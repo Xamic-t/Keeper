@@ -95,6 +95,15 @@ pnpm dev
 
 ---
 
+## 版本管理约定
+
+- **每次改动完成即提交并推送**，不攒批
+- commit message 用中文，格式：`类型: 简述`（类型取 `feat` / `fix` / `docs` / `chore` / `refactor`）
+- **绝不入库**：`.env`、`data/`、`backup/`、`node_modules/`、`frontend/dist/`
+- 数据库备份靠 `pg_dump`，不靠 git
+
+---
+
 ## 一条铁律
 
 **人只做两件事：投喂和查看。** 任何要求用户"先整理好再录入"的设计都是失败的。
