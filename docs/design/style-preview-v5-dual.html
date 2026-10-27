@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keeper · v5 · 双端与登录</title>
+<style>
+  :root{
+    --bg:#FAF7F2; --bg-alt:#F5F0E8;
+    --surface:#FFFFFF; --surface-2:#F7F2EA;
+    --border:#EAE2D6; --border-strong:#DCD2C2;
+    --text:#2B2622; --text-2:#6E6459; --text-3:#9C9184;
+    --accent:#D9694A; --accent-soft:#FBEAE4; --accent-deep:#B9502F;
+    --success:#5B8C6E; --success-soft:#E8F1EA;
+    --warn:#C08A2E; --warn-soft:#FBF0DD;
+    --sh:0 1px 2px rgba(43,38,34,.04), 0 4px 14px rgba(43,38,34,.035);
+    --sh-lg:0 8px 32px rgba(43,38,34,.10);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+  body{
+    background:#EFEAE1;color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:14px;line-height:1.6;padding:48px 32px 80px;
+  }
+
+  .head{max-width:1600px;margin:0 auto 44px}
+  .head h1{font-size:30px;font-weight:650;letter-spacing:-.02em;margin-bottom:6px}
+  .head .sub{font-family:ui-monospace,monospace;font-size:10.5px;letter-spacing:.2em;color:#8A8178;text-transform:uppercase;margin-bottom:14px}
+  .head p{font-size:13.5px;color:var(--text-2);max-width:720px;line-height:1.8}
+
+  .wrap{max-width:1600px;margin:0 auto}
+  .sec{margin-bottom:56px}
+  .sec-hd{display:flex;align-items:baseline;gap:12px;margin-bottom:16px}
+  .sec-hd h2{font-size:15px;font-weight:650;letter-spacing:.01em}
+  .sec-hd span{font-size:11px;color:var(--text-3)}
+  .row{display:flex;gap:28px;flex-wrap:wrap;align-items:flex-start}
+
+  /* ===== 手机壳 ===== */
+  .phone{
+    width:340px;height:712px;background:var(--bg);border-radius:30px;
+    border:1px solid var(--border-strong);overflow:hidden;
+    box-shadow:0 2px 4px rgba(43,38,34,.05),0 18px 44px rgba(43,38,34,.11);
+    display:flex;flex-direction:column;position:relative;flex:0 0 auto;
+  }
+  .pbar{height:38px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 18px 4px;font-size:10px;color:var(--text-3);flex:0 0 auto}
+  .pscreen{flex:1;overflow-y:auto;padding:0 16px 20px;scrollbar-width:none}
+  .pscreen::-webkit-scrollbar{display:none}
+
+  /* ===== 浏览器窗 ===== */
+  .browser{
+    width:1080px;flex:0 0 auto;border-radius:12px;overflow:hidden;
+    border:1px solid var(--border-strong);background:var(--bg);
+    box-shadow:0 2px 4px rgba(43,38,34,.05),0 22px 56px rgba(43,38,34,.12);
+  }
+  .chrome{
+    height:38px;background:#EFEAE1;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:8px;padding:0 14px;flex:0 0 auto;
+  }
+  .dots{display:flex;gap:6px}
+  .dots i{width:10px;height:10px;border-radius:50%;background:#D9D2C4;display:block}
+  .urlbar{
+    flex:1;height:22px;background:#FBF9F5;border:1px solid var(--border);
+    border-radius:6px;display:flex;align-items:center;padding:0 9px;
+    font-size:10.5px;color:var(--text-3);font-family:ui-monospace,monospace;
+  }
+  .viewport{height:690px;display:flex;overflow:hidden}
+
+  /* ===== 侧边栏 ===== */
+  .side{
+    width:208px;flex:0 0 auto;border-right:1px solid var(--border);
+    background:var(--bg-alt);display:flex;flex-direction:column;padding:18px 12px 14px;
+  }
+  .logo{
+    display:flex;align-items:center;gap:8px;padding:0 8px 20px;
+  }
+  .logo .m{
+    width:26px;height:26px;border-radius:8px;background:var(--accent);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .logo .m i{width:9px;height:9px;border:1.6px solid #fff;border-radius:2px;display:block}
+  .logo b{font-size:14.5px;font-weight:650;letter-spacing:.01em}
+
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .nav a{
+    display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:8px;
+    font-size:13px;color:var(--text-2);text-decoration:none;
+  }
+  .nav a .i{width:16px;height:16px;border-radius:5px;border:1.5px solid currentColor;opacity:.7;flex:0 0 auto}
+  .nav a.on{background:var(--surface);color:var(--text);font-weight:600;box-shadow:0 1px 2px rgba(43,38,34,.05)}
+  .nav a.on .i{background:var(--accent-soft);border-color:var(--accent);opacity:1}
+  .nav .badge{
+    margin-left:auto;min-width:16px;height:16px;padding:0 4px;border-radius:999px;
+    background:var(--accent);color:#fff;font-size:9.5px;font-weight:650;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .side-foot{margin-top:auto;border-top:1px solid var(--border);padding-top:12px}
+  .user{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px}
+  .user .av{width:26px;height:26px;border-radius:8px;background:var(--accent-soft);color:var(--accent-deep);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:650}
+  .user .nm{font-size:12px;font-weight:600;line-height:1.2}
+  .user .rl{font-size:10px;color:var(--text-3)}
+
+  /* ===== 主区 ===== */
+  .main{flex:1;overflow-y:auto;padding:26px 32px 30px;scrollbar-width:none}
+  .main::-webkit-scrollbar{display:none}
+  .main-hd{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:22px}
+  .main-hd .t{font-size:24px;font-weight:650;letter-spacing:-.02em;line-height:1.2}
+  .main-hd .d{font-size:12px;color:var(--text-3);margin-top:3px}
+
+  /* ===== 通用组件 ===== */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--sh)}
+  .tag{
+    display:inline-flex;align-items:center;padding:2px 8px;border-radius:999px;
+    font-size:11px;font-weight:500;background:var(--surface-2);color:var(--text-2);
+    border:1px solid var(--border);
+  }
+  .tag-accent{background:var(--accent-soft);color:var(--accent-deep);border-color:#F3D5CA}
+  .tag-warn{background:var(--warn-soft);color:var(--warn);border-color:#F0DFBE}
+  .tag-success{background:var(--success-soft);color:var(--success);border-color:#CFE3D4}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;
+    height:34px;padding:0 14px;border-radius:9px;font-size:13px;font-weight:550;
+    border:1px solid transparent;cursor:default;white-space:nowrap;font-family:inherit;
+  }
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-ghost{background:var(--surface);border-color:var(--border);color:var(--text-2)}
+  .btn-sm{height:29px;padding:0 11px;font-size:12px;border-radius:8px}
+  .btn-block{width:100%;height:42px;font-size:14px;border-radius:11px}
+
+  .lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3)}
+
+  /* ===== 登录（手机） ===== */
+  .login-m{padding:0 22px;display:flex;flex-direction:column;height:100%}
+  .login-brand{padding:52px 0 34px}
+  .login-brand .m{
+    width:44px;height:44px;border-radius:14px;background:var(--accent);
+    display:flex;align-items:center;justify-content:center;margin-bottom:18px;
+  }
+  .login-brand .m i{width:15px;height:15px;border:2.4px solid #fff;border-radius:3px;display:block}
+  .login-brand h1{font-size:28px;font-weight:650;letter-spacing:-.02em;margin-bottom:5px}
+  .login-brand p{font-size:12.5px;color:var(--text-3);line-height:1.7}
+
+  .field{margin-bottom:13px}
+  .field label{display:block;font-size:11.5px;font-weight:600;color:var(--text-2);margin-bottom:5px}
+  .input{
+    height:44px;border-radius:11px;border:1px solid var(--border);
+    background:var(--surface);display:flex;align-items:center;padding:0 13px;
+    font-size:14px;color:var(--text-3);box-shadow:0 1px 2px rgba(43,38,34,.03);
+  }
+  .input.filled{color:var(--text)}
+  .row-between{display:flex;align-items:center;justify-content:space-between;margin:14px 0 18px}
+  .check{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
+  .check i{width:15px;height:15px;border-radius:5px;border:1.5px solid var(--border-strong);display:block}
+  .link{font-size:12px;color:var(--accent);text-decoration:none}
+  .login-foot{margin-top:auto;padding:18px 0 24px;text-align:center;font-size:12px;color:var(--text-3)}
+  .login-foot a{color:var(--accent);text-decoration:none;font-weight:550}
+  .divider{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--text-3);font-size:11px}
+  .divider::before,.divider::after{content:"";flex:1;height:1px;background:var(--border)}
+
+  /* ===== 登录（Web） ===== */
+  .login-web{display:flex;height:100%}
+  .lw-left{
+    width:44%;background:var(--bg-alt);border-right:1px solid var(--border);
+    padding:44px;display:flex;flex-direction:column;justify-content:space-between;
+    position:relative;overflow:hidden;
+  }
+  .lw-left .m{
+    width:46px;height:46px;border-radius:15px;background:var(--accent);
+    display:flex;align-items:center;justify-content:center;margin-bottom:22px;
+  }
+  .lw-left .m i{width:15px;height:15px;border:2.4px solid #fff;border-radius:3px;display:block}
+  .lw-left h1{font-size:34px;font-weight:650;letter-spacing:-.025em;line-height:1.25;margin-bottom:12px}
+  .lw-left h1 span{color:var(--text-3);font-weight:400}
+  .lw-left p{font-size:13px;color:var(--text-2);line-height:1.85;max-width:300px}
+  .lw-quote{font-size:12px;color:var(--text-3);line-height:1.8;border-left:2px solid var(--accent);padding-left:12px;margin-top:30px}
+  .lw-right{
+    flex:1;display:flex;align-items:center;justify-content:center;padding:40px;
+  }
+  .lw-form{width:320px}
+  .lw-form h2{font-size:19px;font-weight:650;margin-bottom:5px}
+  .lw-form .s{font-size:12.5px;color:var(--text-3);margin-bottom:26px}
+
+  /* ===== Web 今日 ===== */
+  .grid-today{display:flex;gap:20px;align-items:flex-start}
+  .gt-left{flex:1.15;min-width:0}
+  .gt-right{width:320px;flex:0 0 auto}
+  .panel-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .panel-hd .t{font-size:12.5px;font-weight:650;color:var(--text-2)}
+  .panel-hd .n{font-size:11px;color:var(--text-3)}
+
+  .titem{display:flex;gap:11px;padding:13px 14px;border-bottom:1px solid var(--border);align-items:flex-start}
+  .titem:last-child{border-bottom:none}
+  .chk{width:18px;height:18px;border-radius:5px;border:1.5px solid var(--border-strong);flex:0 0 auto;margin-top:2px;display:flex;align-items:center;justify-content:center;font-size:10px;color:transparent}
+  .chk.done{background:var(--success);border-color:var(--success);color:#fff}
+  .titem .m{flex:1;min-width:0}
+  .titem .t{font-size:13.5px;font-weight:600;line-height:1.4;margin-bottom:2px}
+  .titem.done .t{color:var(--text-3);text-decoration:line-through;font-weight:500}
+  .titem .s{font-size:11.5px;color:var(--text-3)}
+  .titem .r{font-size:13px;font-weight:650;font-variant-numeric:tabular-nums;flex:0 0 auto}
+  .src{font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--surface-2);color:var(--text-3);margin-right:4px}
+
+  .stat-mini{display:flex;gap:10px;margin-bottom:18px}
+  .sm{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:11px 12px;box-shadow:var(--sh)}
+  .sm .k{font-size:10px;color:var(--text-3);margin-bottom:1px}
+  .sm .v{font-size:19px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+  .sm .v small{font-size:11px;font-weight:500;color:var(--text-3);margin-left:2px}
+
+  .pend-row{display:flex;gap:10px;padding:11px 12px;border-bottom:1px solid var(--border)}
+  .pend-row:last-child{border-bottom:none}
+  .pend-row .who{font-size:12px;font-weight:650;flex:0 0 44px}
+  .pend-row .ct{flex:1;font-size:12px;color:var(--text-2);line-height:1.5;min-width:0}
+  .pend-row .cf{font-size:10px;color:var(--text-3);flex:0 0 auto;font-variant-numeric:tabular-nums}
+
+  /* ===== Web 人 ===== */
+  .toolbar{display:flex;gap:10px;margin-bottom:16px;align-items:center}
+  .search{
+    flex:1;height:38px;background:var(--surface);border:1px solid var(--border);
+    border-radius:10px;display:flex;align-items:center;gap:8px;padding:0 12px;
+    font-size:12.5px;color:var(--text-3);box-shadow:var(--sh);
+  }
+  .search .ic{width:14px;height:14px;border:1.6px solid var(--text-3);border-radius:50%;flex:0 0 auto}
+  .seg{display:flex;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;overflow:hidden}
+  .seg div{padding:8px 13px;font-size:12px;color:var(--text-2)}
+  .seg div.on{background:var(--surface);font-weight:600;color:var(--text)}
+
+  .table{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;box-shadow:var(--sh)}
+  .thead{display:flex;padding:10px 14px;background:var(--surface-2);border-bottom:1px solid var(--border);font-size:10.5px;font-weight:650;color:var(--text-3);letter-spacing:.04em}
+  .trow{display:flex;padding:11px 14px;border-bottom:1px solid var(--border);align-items:center}
+  .trow:last-child{border-bottom:none}
+  .c-name{width:190px;flex:0 0 auto;display:flex;align-items:center;gap:9px}
+  .c-name .av{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:650;flex:0 0 auto}
+  .c-name .nm{font-size:13px;font-weight:600;line-height:1.2}
+  .c-name .ds{font-size:10.5px;color:var(--text-3)}
+  .c-tags{flex:1;display:flex;gap:5px;flex-wrap:wrap;min-width:0}
+  .c-temp{width:64px;flex:0 0 auto;text-align:right;font-size:12.5px;font-weight:650;font-variant-numeric:tabular-nums}
+  .c-last{width:78px;flex:0 0 auto;text-align:right;font-size:11px;color:var(--text-3)}
+
+  /* ===== Web 档案 ===== */
+  .file-grid{display:flex;gap:26px;align-items:flex-start}
+  .fg-left{width:330px;flex:0 0 auto}
+  .fg-right{flex:1;min-width:0}
+  .p-hd{display:flex;gap:12px;align-items:center;margin-bottom:16px}
+  .av-lg{width:52px;height:52px;border-radius:15px;background:var(--accent-soft);color:var(--accent-deep);display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:650;border:1px solid #F3D5CA;flex:0 0 auto}
+  .p-hd h2{font-size:21px;font-weight:650;letter-spacing:-.015em;line-height:1.2}
+  .p-hd .m{font-size:11.5px;color:var(--text-3);margin-top:3px}
+
+  .blk{margin-bottom:16px}
+  .blk-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px}
+  .blk-t{font-size:10px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;color:var(--text-3)}
+  .blk-a{font-size:11px;color:var(--accent)}
+  .sum{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;font-size:12.5px;line-height:1.75;box-shadow:var(--sh)}
+  .sum b{background:linear-gradient(transparent 62%,var(--accent-soft) 62%);font-weight:600}
+  .tags{display:flex;flex-wrap:wrap;gap:5px}
+  .stats{display:flex;gap:7px}
+  .stat{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 10px;box-shadow:var(--sh)}
+  .stat .k{font-size:9.5px;color:var(--text-3)}
+  .stat .v{font-size:15px;font-weight:650;font-variant-numeric:tabular-nums}
+
+  .tl{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 14px 4px;box-shadow:var(--sh)}
+  .tl-i{display:flex;gap:12px;padding-bottom:12px}
+  .tl-i .dt{font-size:10.5px;color:var(--text-3);width:38px;flex:0 0 auto;font-variant-numeric:tabular-nums;padding-top:1px}
+  .tl-i .ct{font-size:12.5px;line-height:1.5;flex:1}
+  .tl-i .ct b{font-weight:650;font-variant-numeric:tabular-nums}
+  .tl-i .ct .k{font-size:9.5px;padding:1px 5px;border-radius:4px;background:var(--surface-2);color:var(--text-3);margin-right:5px}
+
+  /* 说明 */
+  .note{
+    max-width:1600px;margin:20px auto 0;background:#FBF9F5;
+    border:1px solid var(--border);border-radius:16px;padding:26px 28px;
+  }
+  .note h3{font-size:13px;font-weight:650;margin-bottom:14px}
+  .note ul{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px 30px}
+  .note li{list-style:none;font-size:12.5px;color:var(--text-2);line-height:1.8;padding-left:15px;position:relative}
+  .note li::before{content:"·";position:absolute;left:3px;color:var(--accent);font-weight:700}
+  .note b{color:var(--text);font-weight:650}
+  .note code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11px;font-family:ui-monospace,monospace}
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div class="sub">Keeper — v5 / Dual Platform & Auth</div>
+  <h1>手机与 Web，两套布局</h1>
+  <p>
+    同一个网址，两套布局：手机底部 tab，桌面左侧栏 + 多栏内容。<b>不是把手机界面拉宽</b>，
+    而是桌面用上横向空间——今日页两栏，档案页左资料右时间线。<br>
+    另补：<b>邮箱密码登录</b>，手机端全屏表单，桌面端左右分栏。
+  </p>
+</div>
+
+<div class="wrap">
+
+<!-- ========== A. 登录 ========== -->
+<div class="sec">
+  <div class="sec-hd">
+    <h2>A · 登录</h2>
+    <span>手机端全屏 / 桌面端左右分栏</span>
+  </div>
+
+  <div class="row">
+
+    <!-- 手机登录 -->
+    <div class="phone">
+      <div class="pbar"><span>9:41</span><span>●●●</span></div>
+      <div class="pscreen" style="padding:0">
+        <div class="login-m">
+
+          <div class="login-brand">
+            <div class="m"><i></i></div>
+            <h1>Keeper</h1>
+            <p>你的事，我记着。<br>登录后，你的档案只属于你。</p>
+          </div>
+
+          <div class="field">
+            <label>邮箱</label>
+            <div class="input filled">xamic@example.com</div>
+          </div>
+
+          <div class="field">
+            <label>密码</label>
+            <div class="input filled">••••••••••</div>
+          </div>
+
+          <div class="row-between">
+            <span class="check"><i></i>记住我</span>
+            <a class="link" href="#">忘记密码？</a>
+          </div>
+
+          <button class="btn btn-primary btn-block">登录</button>
+
+          <div class="divider">或</div>
+
+          <button class="btn btn-ghost btn-block">用邀请码注册</button>
+
+          <div class="login-foot">
+            还没有账号？<a href="#">联系我拿邀请码</a>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- Web 登录 -->
+    <div class="browser">
+      <div class="chrome">
+        <div class="dots"><i></i><i></i><i></i></div>
+        <div class="urlbar">keeper.app/login</div>
+      </div>
+      <div class="viewport">
+        <div class="login-web">
+
+          <div class="lw-left">
+            <div>
+              <div class="m"><i></i></div>
+              <h1>你的事，<br><span>我记着。</span></h1>
+              <p>把聊天截图丢进来，剩下的交给它——<br>谁喜欢什么、什么时候该送礼、谁快凉了。</p>
+            </div>
+            <div class="lw-quote">
+              「知人者智，自知者明。」<br>
+              <span style="opacity:.6">—《道德经》</span>
+            </div>
+          </div>
+
+          <div class="lw-right">
+            <div class="lw-form">
+              <h2>登录</h2>
+              <div class="s">用你的邮箱继续</div>
+
+              <div class="field">
+                <label>邮箱</label>
+                <div class="input filled">xamic@example.com</div>
+              </div>
+
+              <div class="field">
+                <label>密码</label>
+                <div class="input filled">••••••••••</div>
+              </div>
+
+              <div class="row-between">
+                <span class="check"><i></i>记住我</span>
+                <a class="link" href="#">忘记密码？</a>
+              </div>
+
+              <button class="btn btn-primary btn-block">登录</button>
+
+              <div class="divider">或</div>
+
+              <button class="btn btn-ghost btn-block">用邀请码注册</button>
+
+              <div class="login-foot" style="text-align:left;margin-top:20px">
+                还没有账号？<a href="#">联系我拿邀请码</a>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ========== B. Web 今日 ========== -->
+<div class="sec">
+  <div class="sec-hd">
+    <h2>B · Web 今日</h2>
+    <span>两栏：左边今天该做，右边待确认</span>
+  </div>
+
+  <div class="browser">
+    <div class="chrome">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <div class="urlbar">keeper.app/today</div>
+    </div>
+    <div class="viewport">
+
+      <div class="side">
+        <div class="logo"><div class="m"><i></i></div><b>Keeper</b></div>
+        <div class="nav">
+          <a class="on"><span class="i"></span>今日</a>
+          <a><span class="i"></span>人<span class="badge">18</span></a>
+          <a><span class="i"></span>日历</a>
+          <a><span class="i"></span>助理<span class="badge">3</span></a>
+        </div>
+        <div class="side-foot">
+          <div class="user">
+            <div class="av">X</div>
+            <div>
+              <div class="nm">Xamic</div>
+              <div class="rl">个人版</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="main">
+
+        <div class="main-hd">
+          <div>
+            <div class="t">今天两件事</div>
+            <div class="d">10月27日 周二 · 王姐生日还有 3 天</div>
+          </div>
+          <button class="btn btn-primary">+ 上传截图</button>
+        </div>
+
+        <div class="stat-mini">
+          <div class="sm"><div class="k">今天该做</div><div class="v">4<small>件</small></div></div>
+          <div class="sm"><div class="k">待确认</div><div class="v">3<small>条</small></div></div>
+          <div class="sm"><div class="k">档案总数</div><div class="v">18<small>人</small></div></div>
+          <div class="sm"><div class="k">渐远</div><div class="v" style="color:var(--warn)">3<small>人</small></div></div>
+        </div>
+
+        <div class="grid-today">
+          <div class="gt-left">
+            <div class="panel-hd">
+              <span class="t">今天该做的</span>
+              <span class="n">2 / 4 完成</span>
+            </div>
+            <div class="card">
+              <div class="titem">
+                <div class="chk"></div>
+                <div class="m">
+                  <div class="t">王姐生日 · 还有 3 天</div>
+                  <div class="s"><span class="src">提醒</span>建议白茶礼盒 300–500</div>
+                </div>
+              </div>
+              <div class="titem">
+                <div class="chk"></div>
+                <div class="m">
+                  <div class="t">张总结款 · 3 天后到期</div>
+                  <div class="s"><span class="src">提醒</span>订单 09-28</div>
+                </div>
+                <div class="r">8,600</div>
+              </div>
+              <div class="titem done">
+                <div class="chk done">✓</div>
+                <div class="m">
+                  <div class="t">回复昨天的私信</div>
+                  <div class="s"><span class="src">待办</span>每日固定</div>
+                </div>
+              </div>
+              <div class="titem">
+                <div class="chk"></div>
+                <div class="m">
+                  <div class="t">给李哥发一条问候</div>
+                  <div class="s"><span class="src">助理</span>他昨天说要出差</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="gt-right">
+            <div class="panel-hd">
+              <span class="t">待确认</span>
+              <span class="n">3 条</span>
+            </div>
+            <div class="card">
+              <div class="pend-row">
+                <span class="who">王姐</span>
+                <span class="ct">最近在喝白茶</span>
+                <span class="cf">0.92</span>
+              </div>
+              <div class="pend-row">
+                <span class="who">张总</span>
+                <span class="ct">女儿明年去英国读书</span>
+                <span class="cf" style="color:var(--warn)">0.68</span>
+              </div>
+              <div class="pend-row">
+                <span class="who">李哥</span>
+                <span class="ct">出差去成都，一周</span>
+                <span class="cf">0.88</span>
+              </div>
+            </div>
+
+            <div class="panel-hd" style="margin-top:18px">
+              <span class="t">最近动态</span>
+            </div>
+            <div class="card" style="padding:12px">
+              <div style="font-size:12px;color:var(--text-2);line-height:1.9">
+                <div style="display:flex;gap:8px;margin-bottom:6px"><span style="color:var(--text-3);font-size:11px;width:34px;flex:0 0 auto">10-26</span><span>张总 提到女儿留学</span></div>
+                <div style="display:flex;gap:8px;margin-bottom:6px"><span style="color:var(--text-3);font-size:11px;width:34px;flex:0 0 auto">10-25</span><span>李哥 出差成都</span></div>
+                <div style="display:flex;gap:8px"><span style="color:var(--text-3);font-size:11px;width:34px;flex:0 0 auto">10-24</span><span>陈姐 猫生病了</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== C. Web 人 ========== -->
+<div class="sec">
+  <div class="sec-hd">
+    <h2>C · Web 人</h2>
+    <span>桌面用表格，一屏看 8 个人</span>
+  </div>
+
+  <div class="browser">
+    <div class="chrome">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <div class="urlbar">keeper.app/people</div>
+    </div>
+    <div class="viewport">
+
+      <div class="side">
+        <div class="logo"><div class="m"><i></i></div><b>Keeper</b></div>
+        <div class="nav">
+          <a><span class="i"></span>今日</a>
+          <a class="on"><span class="i"></span>人<span class="badge">18</span></a>
+          <a><span class="i"></span>日历</a>
+          <a><span class="i"></span>助理<span class="badge">3</span></a>
+        </div>
+        <div class="side-foot">
+          <div class="user">
+            <div class="av">X</div>
+            <div><div class="nm">Xamic</div><div class="rl">个人版</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="main">
+
+        <div class="main-hd">
+          <div>
+            <div class="t">人</div>
+            <div class="d">18 个人 · 5 个核心 · 3 个渐远</div>
+          </div>
+          <button class="btn btn-primary">+ 新建</button>
+        </div>
+
+        <div class="toolbar">
+          <div class="search"><span class="ic"></span>搜名字、标签、聊过的事</div>
+          <div class="seg">
+            <div class="on">全部</div>
+            <div>核心</div>
+            <div>快冷了</div>
+          </div>
+        </div>
+
+        <div class="table">
+          <div class="thead">
+            <div class="c-name">人</div>
+            <div class="c-tags">标签</div>
+            <div class="c-temp" style="text-align:right">温度</div>
+            <div class="c-last">上次</div>
+          </div>
+
+          <div class="trow">
+            <div class="c-name">
+              <div class="av" style="background:var(--accent-soft);color:var(--accent-deep)">王</div>
+              <div><div class="nm">王姐</div><div class="ds">建材 · 核心</div></div>
+            </div>
+            <div class="c-tags">
+              <span class="tag">白茶</span><span class="tag tag-warn">装修中</span><span class="tag">一女高二</span>
+            </div>
+            <div class="c-temp" style="color:var(--success)">78 ↑</div>
+            <div class="c-last">3 天前</div>
+          </div>
+
+          <div class="trow">
+            <div class="c-name">
+              <div class="av" style="background:var(--success-soft);color:var(--success)">张</div>
+              <div><div class="nm">张总</div><div class="ds">建材批发</div></div>
+            </div>
+            <div class="c-tags">
+              <span class="tag">两个门店</span><span class="tag">女儿留学</span>
+            </div>
+            <div class="c-temp">62 →</div>
+            <div class="c-last">昨天</div>
+          </div>
+
+          <div class="trow">
+            <div class="c-name">
+              <div class="av" style="background:#EDE8F5;color:#6B5B95">李</div>
+              <div><div class="nm">李哥</div><div class="ds">做物流</div></div>
+            </div>
+            <div class="c-tags">
+              <span class="tag">出差成都</span><span class="tag">爱喝浓茶</span>
+            </div>
+            <div class="c-temp" style="color:var(--success)">71 ↑</div>
+            <div class="c-last">昨天</div>
+          </div>
+
+          <div class="trow">
+            <div class="c-name">
+              <div class="av" style="background:var(--warn-soft);color:var(--warn)">陈</div>
+              <div><div class="nm">陈姐</div><div class="ds">养猫</div></div>
+            </div>
+            <div class="c-tags">
+              <span class="tag">猫生病</span><span class="tag tag-warn">最近烦</span>
+            </div>
+            <div class="c-temp" style="color:var(--warn)">54 ↓</div>
+            <div class="c-last">5 天前</div>
+          </div>
+
+          <div class="trow">
+            <div class="c-name">
+              <div class="av" style="background:#EFEAE1;color:#9C9184">杨</div>
+              <div><div class="nm" style="color:var(--text-2)">杨哥</div><div class="ds">渐远</div></div>
+            </div>
+            <div class="c-tags">
+              <span class="tag">打赏中断</span>
+            </div>
+            <div class="c-temp" style="color:var(--text-3)">31 ↓</div>
+            <div class="c-last">26 天前</div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== D. Web 档案 ========== -->
+<div class="sec">
+  <div class="sec-hd">
+    <h2>D · Web 档案</h2>
+    <span>左栏资料，右栏时间线——桌面才有横向空间</span>
+  </div>
+
+  <div class="browser">
+    <div class="chrome">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <div class="urlbar">keeper.app/people/19</div>
+    </div>
+    <div class="viewport">
+
+      <div class="side">
+        <div class="logo"><div class="m"><i></i></div><b>Keeper</b></div>
+        <div class="nav">
+          <a><span class="i"></span>今日</a>
+          <a class="on"><span class="i"></span>人<span class="badge">18</span></a>
+          <a><span class="i"></span>日历</a>
+          <a><span class="i"></span>助理<span class="badge">3</span></a>
+        </div>
+        <div class="side-foot">
+          <div class="user">
+            <div class="av">X</div>
+            <div><div class="nm">Xamic</div><div class="rl">个人版</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="main">
+
+        <div style="font-size:12px;color:var(--accent);margin-bottom:14px">‹ 返回人</div>
+
+        <div class="p-hd">
+          <div class="av-lg">王</div>
+          <div>
+            <h2>王姐</h2>
+            <div class="m">建材 · 核心 · 认识 2 年 · 上次 10-03 · 温度 78 ↑</div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm">发消息</button>
+            <button class="btn btn-ghost btn-sm">编辑</button>
+          </div>
+        </div>
+
+        <div class="file-grid">
+
+          <div class="fg-left">
+            <div class="blk">
+              <div class="blk-hd">
+                <span class="blk-t">AI 综述</span>
+                <span class="blk-a">重写</span>
+              </div>
+              <div class="sum">
+                王姐，38 岁，做建材生意，有个上高二的女儿。
+                喜欢<b>喝白茶</b>、讨厌太甜的东西。最近<b>在装修</b>，忌讳聊年龄。上次沟通 10-03。
+              </div>
+            </div>
+
+            <div class="blk">
+              <div class="blk-hd"><span class="blk-t">标签</span></div>
+              <div class="tags">
+                <span class="tag">行业 建材</span>
+                <span class="tag">一女高二</span>
+                <span class="tag">偏好 白茶</span>
+                <span class="tag tag-warn">装修中 · 剩 2 月</span>
+                <span class="tag">忌聊年龄</span>
+              </div>
+            </div>
+
+            <div class="blk">
+              <div class="blk-hd"><span class="blk-t">往来</span></div>
+              <div class="stats">
+                <div class="stat"><div class="k">他给我</div><div class="v">12,400</div></div>
+                <div class="stat"><div class="k">我给他</div><div class="v">3,200</div></div>
+              </div>
+            </div>
+
+            <div class="blk">
+              <div class="blk-hd"><span class="blk-t">关系</span></div>
+              <div class="card" style="padding:11px 12px">
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-2);margin-bottom:5px">
+                  <span>哥姐</span><span style="color:var(--text-3)">2024-03 起 · 核心</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--text-2)">
+                  <span>客户</span><span style="color:var(--text-3)">2025-11 起 · 熟</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="fg-right">
+            <div class="blk">
+              <div class="blk-hd">
+                <span class="blk-t">时间线</span>
+                <span class="blk-a">全部 32 条</span>
+              </div>
+              <div class="tl">
+                <div class="tl-i"><span class="dt">10-05</span><span class="ct"><span class="k">往来</span>打赏 <b>￥520</b></span></div>
+                <div class="tl-i"><span class="dt">10-03</span><span class="ct"><span class="k">事实</span>"最近在喝白茶，太甜的喝不了"</span></div>
+                <div class="tl-i"><span class="dt">09-28</span><span class="ct"><span class="k">往来</span>订单 <b>￥1,800</b> · 已结</span></div>
+                <div class="tl-i"><span class="dt">09-20</span><span class="ct"><span class="k">事实</span>开始装修，说"烦死了"</span></div>
+                <div class="tl-i"><span class="dt">08-15</span><span class="ct"><span class="k">事件</span>女儿开学，高二</span></div>
+                <div class="tl-i"><span class="dt">07-02</span><span class="ct"><span class="k">往来</span>打赏 <b>￥1,000</b></span></div>
+                <div class="tl-i"><span class="dt">06-11</span><span class="ct"><span class="k">事实</span>忌聊年龄，说过"别问我多大"</span></div>
+              </div>
+            </div>
+
+            <div class="blk">
+              <div class="blk-hd">
+                <span class="blk-t">往来明细</span>
+                <span class="blk-a">全部</span>
+              </div>
+              <div class="card" style="padding:10px 12px;font-size:12px;color:var(--text-2)">
+                <div style="display:flex;justify-content:space-between;padding:4px 0">
+                  <span>10-05 · 打赏 · 他给我</span><b style="font-variant-numeric:tabular-nums">+520</b>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:4px 0">
+                  <span>09-28 · 订单 · 他给我</span><b style="font-variant-numeric:tabular-nums">+1,800</b>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:4px 0">
+                  <span>09-12 · 礼物 · 我给他</span><b style="font-variant-numeric:tabular-nums;color:var(--text-3)">−680</b>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+</div>
+
+<!-- 说明 -->
+<div class="note">
+  <h3>双端策略（写进技术方案）</h3>
+  <ul>
+    <li><b>同一个网址，两套布局</b>。不是响应式压缩，是两套独立的容器组件</li>
+    <li>断点：<code>&lt; 768px</code> 移动（底部 tab）/ <code>768–1024</code> 平板（收窄侧栏）/ <code>≥ 1024</code> 桌面（固定侧栏 208px）</li>
+    <li>共用组件：卡片、标签、按钮、时间线；<b>不共用容器</b>：导航、列表、详情页排布</li>
+    <li>桌面利用横向空间：今日两栏、档案左资料右时间线、人物用表格</li>
+    <li>登录：邮箱 + 密码，<b>邀请制注册</b>，不做开放注册</li>
+    <li>密码用 <code>argon2</code> 哈希，登录失败 5 次锁 15 分钟</li>
+    <li>会话用 httpOnly cookie + CSRF token，不用 JWT 存 localStorage</li>
+    <li>忘记密码走邮件重置（需配 SMTP）</li>
+  </ul>
+</div>
+
+</body>
+</html>
