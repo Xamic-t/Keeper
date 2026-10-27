@@ -1,0 +1,229 @@
+# HANDOFF · 开发交接说明
+
+> **这份文档给接手开发的 Agent 看。** 读完它，你应该知道：做什么、读什么、按什么顺序做、怎么算做完。
+> 最后更新：2026-10-28 02:00 · 当前进度 **W1 已完成**
+
+---
+
+## 一、你要做什么
+
+**项目**：Keeper —— 面向私域关系维护的 AI Agent（Python + FastAPI + PostgreSQL 17 + Vue 3）
+
+**当前状态**：
+
+| 层 | 状态 |
+|---|---|
+| 设计文档 | ✅ 16 份，`docs/` 下 |
+| 后端骨架 | ✅ 可运行，`backend/` |
+| 数据库 | ✅ **12 张表 + RLS 已建好并验证** |
+| 业务接口 | ❌ **45 个接口一个没写，这是你的活** |
+| 前端 | ❌ 空目录 |
+
+**你的任务**：按 `docs/14-开工手册.md` 的排期，从 **W2** 开始，一个模块一个模块把业务代码写完。
+
+---
+
+## 二、开工前必须读的（顺序不能乱）
+
+| 顺序 | 文档 | 读多久 | 为什么必须读 |
+|---|---|---|---|
+| 1 | `docs/CONSTITUTION.md` | 3 分钟 | 不可让步的原则，违反就是返工 |
+| 2 | `docs/ARCHITECTURE.md` 第 11、19.6 节 | 10 分钟 | 目录怎么放、什么时候不许加封装 |
+| 3 | `specs/README.md` | 3 分钟 | 函数六问格式 |
+| 4 | `specs/01-auth.md`、`specs/02-persons.md` | 15 分钟 | **W2 要写的两个板块** |
+| 5 | `docs/10-接口响应规范.md` 第 3、5 节 | 5 分钟 | 响应长什么样 |
+
+**其他文档按需查，不要通读。**
+
+---
+
+## 三、六条铁律（违反就是错）
+
+| # | 铁律 | 出处 |
+|---|---|---|
+| 1 | **`api/` 不写业务逻辑**。路由函数超过 30 行就是放错了 | ARCHITECTURE 11.2 |
+| 2 | **`services/` 不 import fastapi**（`HTTPException` 除外） | 同上 |
+| 3 | **`models/` 不写查询**。出现 `select()` 就是错的 | 同上 |
+| 4 | **查询不写 `where user_id`**。RLS 会自动加 | ARCHITECTURE 15.5 |
+| 5 | **业务错误用 `AppError`**，不裸抛 `HTTPException` | ARCHITECTURE 13.2 |
+| 6 | **加任何封装前答三问**：框架有吗？说得清吗？当前有调用者吗？ | ARCHITECTURE 19.6 |
+
+---
+
+## 四、写一个模块的标准动作（9 步，照做）
+
+```
+1. 读该板块的 spec（specs/NN-xxx.md）
+2. models/ 有表吗？没有先加（W1 已建 12 张，一般不用加）
+3. services/xxx.py 写业务逻辑（先写测试再写实现也行）
+4. tests/services/test_xxx.py 写单测（不起 HTTP）
+5. api/xxx.py 写路由 + 请求/响应模型（每个 ≤30 行）
+6. api/router.py 挂一行 include_router
+7. curl 验证：状态码、响应格式、日志
+8. 换第二个账号验证：跨用户拿不到数据（验证 RLS）
+9. git commit + push（推送必须带代理，见第八节）
+```
+
+**第 7、8 步不许跳。** 它们是唯一能证明"对"的环节。
+
+---
+
+## 五、排期
+
+排期在 **`docs/14-开工手册.md`** 第三节，表格到天。这里给摘要：
+
+| 周 | 主线 | 交付 | 周验收 |
+|---|---|---|---|
+| ~~W1~~ | ~~建表 + RLS~~ | ✅ **已完成** | 双账号隔离通过 |
+| **W2** | **认证 + 人模块** | `core/security.py`<br>`services/auth.py`<br>`api/auth.py`<br>`services/person.py`<br>`api/persons.py` | 三种格式能登录；两个账号各建一人互不可见；路由都用 `response_model` |
+| W3 | 部署上线 | Docker + Caddy + 域名 | 手机能打开 |
+| W4 | 投喂上传 | `api/ingest.py` | 传 10 张不卡 |
+| W5 | VLM 抽取 | `services/vision.py`<br>`services/extract.py` | **准确率 ≥75%** |
+| W6 | 确认队列 | `services/confirm.py` | 传图→确认→档案变厚 |
+| W7 | 画像 | `services/profile.py` | 能筛"谁喜欢茶" |
+| W8 | 往来 + 日历 | `services/ledger.py`<br>`services/festival.py` | 农历生日算对 |
+| W9 | 提醒 + 推送 | `services/reminder.py`<br>`services/notify.py` | 手机收到带依据的提醒 |
+| W10 | 待办 + 今日 | `services/todo.py`<br>`services/today.py` | 端到端走通一天 |
+| W11-12 | 前端换皮 | 按 `docs/design/style-preview-v5-dual.html` | 与设计稿一致 |
+
+**每周结束必须 commit + push，并在 `docs/W{N}-完成报告.md` 写一份简报。**
+
+---
+
+## 六、每个模块的 Spec 在哪
+
+| 板块 | Spec | 状态 |
+|---|---|---|
+| 认证 | `specs/01-auth.md` | ✅ 完整 |
+| 人 | `specs/02-persons.md` | ✅ 完整 |
+| 投喂 | `specs/03-ingest.md` | ✅ 完整 |
+| 抽取 | `specs/04-extract.md` | ✅ 完整 |
+| 确认 | `specs/05-confirm.md` | ✅ 完整 |
+| 画像 | `specs/06-profile.md` | ✅ 完整 |
+| 往来 | `specs/07-ledger.md` | ✅ 完整 |
+| 日历 | `specs/08-events.md` | ✅ 完整 |
+| 提醒 | `specs/09-reminder.md` | ✅ 完整 |
+| 待办 | `specs/10-todos.md` | ✅ 完整 |
+| 今日 | `specs/11-today.md` | ✅ 完整 |
+
+**spec 里没有的函数，不要写。** 需要新函数 → 先补 spec 的六问，再写代码。
+
+---
+
+## 七、怎么算做完
+
+### 单模块完成（每写完一个模块自查）
+
+```
+□ spec 里的函数全部实现
+□ services/ 有单测，pytest 能过
+□ 路由都有 response_model
+□ curl 验证过：状态码对、响应格式对
+□ 换第二个账号验证过：拿不到别人的数据
+□ ruff check + ruff format 全过
+□ commit + push
+```
+
+### W2 完成（本周验收）
+
+```
+□ 用户名 / 手机号 / 邮箱 三种格式都能登录
+□ 密码错 5 次锁 15 分钟
+□ 未登录访问业务接口返回 401
+□ 两个账号各建一个人，列表互相看不见
+□ 建人后 relationships 表有对应记录
+□ 删人后 10 张表相关数据全没，todos.person_id 变 NULL
+```
+
+---
+
+## 八、环境与命令
+
+### 启动
+
+```bash
+cd /Users/xamic/Customers_System
+
+# 1. 起数据库（Docker Desktop 必须先开）
+docker compose up -d db
+docker compose ps                    # 期望 healthy
+
+# 2. 起后端
+cd backend
+uv sync
+uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 常用
+
+```bash
+uv run alembic upgrade head          # 迁移
+uv run alembic revision --autogenerate -m "xxx"
+uv run pytest                        # 测试
+uv run ruff check . && uv run ruff format .
+curl -s --noproxy '*' localhost:8000/api/health
+```
+
+### 推送（**必须带代理，否则 502**）
+
+```bash
+git -c http.proxy=http://127.0.0.1:7897 \
+    -c https.proxy=http://127.0.0.1:7897 push origin main
+```
+
+---
+
+## 九、卡住了怎么办
+
+| 卡在哪 | 查哪 |
+|---|---|
+| 不知道代码放哪个文件 | `ARCHITECTURE` 11.3 目录责任表 |
+| 想加个工具函数 / 依赖 | `ARCHITECTURE` 19.6 三条判定 |
+| 两份文档说法不一致 | 优先级：`06` > `07` > `05` > `02` > `01`，然后回头改上层 |
+| 不知道响应该返回什么 | `docs/10-接口响应规范` |
+| 不确定某个函数怎么写 | 该板块的 `specs/NN-xxx.md` 六问 |
+| 数据库连不上 | `docker compose ps`；`uv run python -c "..."` 跑 `check_database` |
+
+---
+
+## 十、绝对不要做
+
+| 禁止 | 为什么 |
+|---|---|
+| 手工 `ALTER TABLE` | 第二天没人知道线上结构 |
+| 在 `api/` 里写 `if` 判断业务 | 无法单测 |
+| 查询里写 `where user_id` | RLS 会加，重复且可能出错 |
+| 在业务代码里硬编码错误字符串 | 前端判断不到 |
+| 加"以后可能用"的封装 | 违反 19.6，且零调用代码会腐烂 |
+| 改 `docs/` 里的设计结论而不说 | 设计与代码会脱节 |
+| 跳过"第二账号验证" | RLS 问题最难发现 |
+
+---
+
+## 十一、当前已知的遗留（可以顺手修）
+
+| # | 问题 | 怎么修 |
+|---|---|---|
+| 1 | 多数表 `default` 只在 Python 层，库里无 `DEFAULT`。直接 SQL 插入要显式传值 | 给字段加 `sa_column_kwargs={"server_default": ...}`，出一个 `0003` 迁移 |
+| 2 | 500 响应没有 `X-Trace-Id` 头，响应体也没有 `trace_id` | 在 `_handle_unexpected` 里读 `request.state.trace_id`，写进头和体 |
+| 3 | 同一异常记两次日志（中间件 + handler） | 删掉中间件里的 `try/except` |
+| 4 | 缺 `IntegrityError → 409` 处理器 | 加一个 handler |
+| 5 | 全项目 `response_model` 零使用 | 写第一个业务接口时必须用上 |
+
+**这 5 条写在 `docs/13-验收汇总.md`，按优先级：2 > 4 > 3 > 1 > 5。**
+W2 结束前应全部清掉。
+
+---
+
+## 十二、一句提醒
+
+> **这个项目最难的不是写代码，是三个月后还能看懂。**
+> 所以：函数先有 spec，路由不超过 30 行，查询不写 where user_id，加封装前先问三遍。
+
+---
+
+## 变更记录
+
+| 日期 | 版本 | 变更 |
+|---|---|---|
+| 2026-10-28 | v1.0 | 首版：W1 完成后的交接说明，覆盖 W2-W12 |
