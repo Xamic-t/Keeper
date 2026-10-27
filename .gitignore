@@ -1,0 +1,36 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---- Node ----
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# ---- 环境变量与密钥（绝不能提交）----
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ---- 业务数据（绝不能提交）----
+data/
+backup/
+
+# ---- 编辑器 ----
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ---- 日志 ----
+*.log
+logs/

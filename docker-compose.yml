@@ -1,0 +1,48 @@
+# 三个容器：db（Postgres+pgvector）/ app（FastAPI）/ web（Caddy 托管前端并反代 API）
+# 首次启动前：cp .env.example .env 并填好 DB_PASSWORD
+
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: zhiren
+      POSTGRES_USER: zhiren
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 里设置 DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      # 只绑定本机，供本地开发直连；生产环境删掉这一段
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zhiren -d zhiren"]
+      interval: 10s
+      retries: 5
+
+  app:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./backend/prompts:/app/prompts
+    env_file: .env
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    depends_on:
+      - app
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./frontend/dist:/srv
+      - caddy_data:/data
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+
+volumes:
+  pg_data:      # 数据库卷，绝对不能丢
+  caddy_data:   # 证书卷

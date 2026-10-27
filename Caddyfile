@@ -1,0 +1,26 @@
+# 把 yourdomain.com 换成你的域名（备案通过后再改）
+# Caddy 会自动申请并续期 Let's Encrypt 证书，不需要手动配 certbot
+
+yourdomain.com {
+	encode gzip
+
+	# API 反代到 FastAPI
+	handle /api/* {
+		reverse_proxy app:8000
+	}
+
+	# 前端 SPA
+	handle {
+		root * /srv
+		# 这一行不能少：否则刷新 /person/3 会 404
+		try_files {path} /index.html
+		file_server
+	}
+
+	# 安全响应头
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
