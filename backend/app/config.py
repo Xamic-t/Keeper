@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
 
     # ---- 数据库 ----
+    # 应用运行时使用：普通角色（NOSUPERUSER NOBYPASSRLS），受 RLS 约束
     database_url: str = "postgresql+psycopg://keeper:keeper@localhost:5432/keeper"
+    # 迁移专用：owner 角色，需要 DDL 权限；未配置时回退到 database_url
+    database_url_migrate: str | None = None
     db_pool_size: int = 5
     db_max_overflow: int = 5
     # 打印 SQL（会带出插入的数据，默认关闭）
