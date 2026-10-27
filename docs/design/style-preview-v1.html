@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keeper · 设计样张 v1 · 暖光</title>
+<style>
+  :root{
+    --bg:#FAF7F2; --bg-alt:#F5F0E8;
+    --surface:#FFFFFF; --surface-2:#F7F2EA;
+    --border:#EAE2D6; --border-strong:#DCD2C2;
+    --text:#2B2622; --text-2:#6E6459; --text-3:#9C9184;
+    --accent:#D9694A; --accent-soft:#FBEAE4; --accent-deep:#B9502F;
+    --success:#5B8C6E; --success-soft:#E8F1EA;
+    --warn:#C08A2E; --warn-soft:#FBF0DD;
+    --r-xl:20px; --r-lg:14px; --r-md:10px; --r-sm:6px;
+    --sh:0 1px 2px rgba(43,38,34,.04), 0 4px 14px rgba(43,38,34,.035);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+  body{
+    background:#EFEAE1; color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    font-size:15px; line-height:1.6; padding:48px 32px 80px;
+  }
+
+  /* ---------- 页头 ---------- */
+  .page-head{max-width:1280px;margin:0 auto 44px}
+  .brand{display:flex;align-items:baseline;gap:12px;margin-bottom:10px}
+  .brand h1{font-size:30px;letter-spacing:-.02em;font-weight:650}
+  .brand span{font-size:13px;color:var(--text-3);letter-spacing:.08em;text-transform:uppercase}
+  .page-head p{color:var(--text-2);font-size:14px;max-width:640px}
+
+  /* ---------- 布局 ---------- */
+  .wrap{max-width:1280px;margin:0 auto}
+  .row{display:flex;gap:36px;flex-wrap:wrap;align-items:flex-start}
+  .section-title{
+    font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--text-3);margin:0 0 16px;font-weight:600;
+  }
+
+  /* ---------- 手机外壳 ---------- */
+  .phone{
+    width:375px;height:780px;background:var(--bg);border-radius:34px;
+    border:1px solid var(--border-strong);overflow:hidden;
+    box-shadow:0 2px 4px rgba(43,38,34,.05),0 20px 50px rgba(43,38,34,.10);
+    display:flex;flex-direction:column;position:relative;flex:0 0 auto;
+  }
+  .notch{
+    position:absolute;top:10px;left:50%;transform:translateX(-50%);
+    width:96px;height:5px;border-radius:3px;background:#D8CFC1;z-index:5;
+  }
+  .statusbar{
+    height:44px;display:flex;align-items:flex-end;justify-content:space-between;
+    padding:0 22px 6px;font-size:11px;color:var(--text-3);flex:0 0 auto;
+  }
+  .screen{flex:1;overflow-y:auto;padding:0 18px 90px;scrollbar-width:none}
+  .screen::-webkit-scrollbar{display:none}
+
+  /* ---------- 通用组件 ---------- */
+  .h-page{font-size:26px;font-weight:650;letter-spacing:-.02em;line-height:1.25}
+  .h-sec{font-size:13px;font-weight:600;color:var(--text-2);letter-spacing:.02em}
+  .meta{font-size:12.5px;color:var(--text-3)}
+  .body-sm{font-size:13.5px;color:var(--text-2);line-height:1.65}
+
+  .card{
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--r-lg);padding:14px;box-shadow:var(--sh);
+  }
+  .card-lg{border-radius:var(--r-xl);padding:16px}
+
+  .tag{
+    display:inline-flex;align-items:center;padding:3px 9px;border-radius:999px;
+    font-size:11.5px;font-weight:500;background:var(--surface-2);color:var(--text-2);
+    border:1px solid var(--border);
+  }
+  .tag-accent{background:var(--accent-soft);color:var(--accent-deep);border-color:#F3D5CA}
+  .tag-success{background:var(--success-soft);color:var(--success);border-color:#CFE3D4}
+  .tag-warn{background:var(--warn-soft);color:var(--warn);border-color:#F0DFBE}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    height:38px;padding:0 16px;border-radius:var(--r-md);
+    font-size:13.5px;font-weight:550;border:1px solid transparent;
+    cursor:default;white-space:nowrap;
+  }
+  .btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 2px rgba(217,105,74,.25)}
+  .btn-ghost{background:var(--surface);border-color:var(--border);color:var(--text-2)}
+  .btn-sm{height:32px;padding:0 12px;font-size:12.5px;border-radius:8px}
+
+  /* ---------- 底部导航 ---------- */
+  .tabbar{
+    position:absolute;bottom:0;left:0;right:0;height:76px;
+    background:rgba(250,247,242,.92);backdrop-filter:blur(12px);
+    border-top:1px solid var(--border);display:flex;align-items:flex-start;
+    padding-top:10px;z-index:4;
+  }
+  .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;color:var(--text-3);font-size:10.5px}
+  .tab.on{color:var(--accent)}
+  .tab .ico{width:21px;height:21px;border-radius:6px;border:1.6px solid currentColor;opacity:.9}
+  .tab.on .ico{background:var(--accent-soft);border-color:var(--accent)}
+
+  /* ---------- 今日页 ---------- */
+  .greet{padding:12px 0 18px}
+  .greet .date{font-size:12.5px;color:var(--text-3);letter-spacing:.02em;margin-bottom:6px}
+  .greet h1{font-size:27px;font-weight:650;letter-spacing:-.02em}
+  .greet .sub{font-size:13.5px;color:var(--text-2);margin-top:4px}
+
+  .todo-card{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--r-xl);
+    overflow:hidden;margin-bottom:20px;box-shadow:var(--sh);
+  }
+  .todo-hd{
+    padding:13px 16px 11px;display:flex;align-items:center;justify-content:space-between;
+    border-bottom:1px solid var(--border);
+  }
+  .todo-hd .l{font-size:12px;font-weight:600;color:var(--text-2);letter-spacing:.03em}
+  .todo-hd .n{font-size:11.5px;color:var(--text-3)}
+  .todo-item{display:flex;gap:12px;padding:14px 16px;border-bottom:1px solid var(--border)}
+  .todo-item:last-child{border-bottom:none}
+  .todo-item .dot{
+    width:8px;height:8px;border-radius:50%;background:var(--accent);
+    margin-top:7px;flex:0 0 auto;
+  }
+  .todo-item .dot.gray{background:var(--warn)}
+  .todo-item .main{flex:1;min-width:0}
+  .todo-item .t{font-size:14.5px;font-weight:600;margin-bottom:3px}
+  .todo-item .d{font-size:12.5px;color:var(--text-3);line-height:1.5}
+  .todo-item .amt{font-size:14px;font-weight:650;color:var(--text);font-variant-numeric:tabular-nums}
+
+  .pending-hd{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px}
+  .count{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-width:18px;height:18px;padding:0 5px;border-radius:999px;
+    background:var(--accent);color:#fff;font-size:11px;font-weight:650;
+  }
+
+  .fact{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
+    padding:13px 14px;margin-bottom:10px;box-shadow:var(--sh);
+  }
+  .fact-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+  .fact-hd .who{font-size:12.5px;font-weight:650;color:var(--text)}
+  .fact-hd .conf{font-size:10.5px;color:var(--text-3);font-variant-numeric:tabular-nums}
+  .fact .content{font-size:14px;line-height:1.55;margin-bottom:8px}
+  .fact .src{font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:5px}
+  .fact .acts{display:flex;gap:8px;margin-top:11px}
+
+  /* ---------- 档案页 ---------- */
+  .profile-hd{padding:12px 0 18px}
+  .avatar{
+    width:52px;height:52px;border-radius:16px;background:var(--accent-soft);
+    color:var(--accent-deep);display:flex;align-items:center;justify-content:center;
+    font-size:21px;font-weight:600;margin-bottom:12px;border:1px solid #F3D5CA;
+  }
+  .profile-hd h2{font-size:24px;font-weight:650;letter-spacing:-.01em;margin-bottom:6px}
+  .profile-hd .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+
+  .block{margin-bottom:22px}
+  .block-hd{
+    display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;
+  }
+  .block-hd .t{font-size:11px;font-weight:650;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3)}
+  .block-hd .a{font-size:11.5px;color:var(--accent)}
+
+  .summary{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);
+    padding:15px;font-size:14px;line-height:1.75;color:var(--text);box-shadow:var(--sh);
+  }
+  .summary .hl{background:linear-gradient(transparent 62%, var(--accent-soft) 62%);font-weight:550}
+
+  .tl{position:relative;padding-left:18px}
+  .tl::before{content:"";position:absolute;left:4px;top:6px;bottom:6px;width:1.5px;background:var(--border)}
+  .tl-item{position:relative;padding:0 0 16px}
+  .tl-item::before{
+    content:"";position:absolute;left:-18px;top:6px;width:9px;height:9px;
+    border-radius:50%;background:var(--bg);border:2px solid var(--border-strong);
+  }
+  .tl-item.hot::before{border-color:var(--accent);background:var(--accent-soft)}
+  .tl-item .when{font-size:11px;color:var(--text-3);margin-bottom:2px;font-variant-numeric:tabular-nums}
+  .tl-item .what{font-size:13.5px;line-height:1.5}
+  .tl-item .what b{font-weight:650;font-variant-numeric:tabular-nums}
+
+  .stat-row{display:flex;gap:10px}
+  .stat{
+    flex:1;background:var(--surface);border:1px solid var(--border);
+    border-radius:var(--r-md);padding:11px 12px;
+  }
+  .stat .k{font-size:10.5px;color:var(--text-3);margin-bottom:3px}
+  .stat .v{font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+
+  /* ---------- 提醒卡片 ---------- */
+  .notify-wrap{width:375px;flex:0 0 auto}
+  .wx-hd{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 4px 10px;font-size:12px;color:var(--text-3);
+  }
+  .notify{
+    background:#F2EFE9;border-radius:var(--r-lg);padding:14px;
+  }
+  .notify .who-line{font-size:12px;color:var(--text-3);margin-bottom:6px}
+  .notify-card{
+    background:var(--surface);border-radius:var(--r-md);overflow:hidden;
+    box-shadow:0 1px 3px rgba(43,38,34,.06);
+  }
+  .notify-top{
+    padding:12px 14px;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;gap:8px;
+  }
+  .notify-body{padding:14px}
+  .sug{
+    background:var(--accent-soft);border-radius:var(--r-sm);padding:11px 12px;margin-bottom:12px;
+  }
+  .sug .lab{font-size:10.5px;color:var(--accent-deep);letter-spacing:.06em;margin-bottom:3px;font-weight:600}
+  .sug .val{font-size:15px;font-weight:650;color:var(--text)}
+  .sug .val em{font-style:normal;font-size:13px;font-weight:500;color:var(--text-2);margin-left:6px}
+
+  .reasons{margin-bottom:13px}
+  .reasons .lab{font-size:10.5px;color:var(--text-3);letter-spacing:.06em;margin-bottom:6px;font-weight:600}
+  .reasons li{
+    list-style:none;font-size:12.5px;color:var(--text-2);line-height:1.6;
+    padding-left:12px;position:relative;margin-bottom:2px;
+  }
+  .reasons li::before{
+    content:"";position:absolute;left:0;top:8px;width:4px;height:4px;
+    border-radius:50%;background:var(--border-strong);
+  }
+  .script{
+    background:var(--surface-2);border-radius:var(--r-sm);padding:11px 12px;
+    font-size:13px;line-height:1.7;color:var(--text);margin-bottom:13px;
+    border-left:2.5px solid var(--accent);
+  }
+  .notify-acts{display:flex;gap:8px}
+  .notify-acts .btn{flex:1}
+
+  /* ---------- 规范说明 ---------- */
+  .specs{max-width:1280px;margin:64px auto 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:28px}
+  .spec{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px}
+  .spec h3{font-size:13px;font-weight:650;margin-bottom:14px;letter-spacing:.02em}
+  .swatches{display:flex;flex-wrap:wrap;gap:10px}
+  .sw{display:flex;flex-direction:column;gap:5px;width:72px}
+  .sw i{display:block;height:44px;border-radius:9px;border:1px solid rgba(43,38,34,.07)}
+  .sw span{font-size:10px;color:var(--text-3);line-height:1.3}
+  .sw b{font-size:10px;font-weight:550;color:var(--text-2);font-variant-numeric:tabular-nums}
+
+  .scale li{list-style:none;display:flex;align-items:baseline;gap:10px;margin-bottom:9px}
+  .scale .sz{font-size:10px;color:var(--text-3);width:44px;flex:0 0 auto;font-variant-numeric:tabular-nums}
+  .scale .demo{font-weight:600;letter-spacing:-.01em}
+
+  .rules li{list-style:none;font-size:12.5px;color:var(--text-2);line-height:1.7;padding-left:14px;position:relative;margin-bottom:6px}
+  .rules li::before{content:"—";position:absolute;left:0;color:var(--text-3)}
+  .rules code{background:var(--surface-2);padding:1px 5px;border-radius:4px;font-size:11.5px;font-family:ui-monospace,monospace}
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <div class="brand">
+    <h1>Keeper</h1>
+    <span>Design Preview v1</span>
+  </div>
+  <p>暖光方案 · 手机优先 · 三个核心界面。<br>
+     左边今日页，中间人物档案，右边企业微信里的提醒卡片。</p>
+</div>
+
+<div class="wrap">
+<div class="row">
+
+  <!-- ============ 1. 今日页 ============ -->
+  <div>
+    <p class="section-title">01 · 今日页（默认首页）</p>
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="statusbar"><span>9:41</span><span>●●● ⌁ ▮</span></div>
+      <div class="screen">
+
+        <div class="greet">
+          <div class="date">10月27日 · 周二</div>
+          <h1>今天两件事</h1>
+          <div class="sub">王姐生日还有 3 天，张总的款该催了</div>
+        </div>
+
+        <div class="todo-card">
+          <div class="todo-hd">
+            <span class="l">今天该做的</span>
+            <span class="n">2 件</span>
+          </div>
+
+          <div class="todo-item">
+            <div class="dot"></div>
+            <div class="main">
+              <div class="t">王姐生日 · 还有 3 天</div>
+              <div class="d">建议白茶礼盒 ￥300-500 · 去年送过香水</div>
+            </div>
+            <div class="amt">→</div>
+          </div>
+
+          <div class="todo-item">
+            <div class="dot gray"></div>
+            <div class="main">
+              <div class="t">张总结款 · 3 天后到期</div>
+              <div class="d">建材批发 · 订单 09-28</div>
+            </div>
+            <div class="amt">8,600</div>
+          </div>
+        </div>
+
+        <div class="pending-hd">
+          <span class="h-sec">待确认 <span class="count">3</span></span>
+          <span class="meta">全部确认</span>
+        </div>
+
+        <div class="fact">
+          <div class="fact-hd">
+            <span class="who">王姐</span>
+            <span class="conf">0.92</span>
+          </div>
+          <div class="content">最近在喝白茶</div>
+          <div class="src">偏好 · 10-03 聊天 · 查看原图</div>
+          <div class="acts">
+            <button class="btn btn-primary btn-sm">✓ 记下</button>
+            <button class="btn btn-ghost btn-sm">✗</button>
+            <button class="btn btn-ghost btn-sm">改</button>
+          </div>
+        </div>
+
+        <div class="fact">
+          <div class="fact-hd">
+            <span class="who">张总</span>
+            <span class="conf" style="color:var(--warn)">0.68</span>
+          </div>
+          <div class="content">女儿明年要去英国读书</div>
+          <div class="src">家庭 · 10-26 聊天 · 查看原图</div>
+          <div class="acts">
+            <button class="btn btn-primary btn-sm">✓ 记下</button>
+            <button class="btn btn-ghost btn-sm">✗</button>
+            <button class="btn btn-ghost btn-sm">改</button>
+          </div>
+        </div>
+
+      </div>
+      <div class="tabbar">
+        <div class="tab on"><div class="ico"></div>今日</div>
+        <div class="tab"><div class="ico"></div>人</div>
+        <div class="tab"><div class="ico"></div>日历</div>
+        <div class="tab"><div class="ico"></div>待办</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 2. 档案页 ============ -->
+  <div>
+    <p class="section-title">02 · 人物档案</p>
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="statusbar"><span>9:41</span><span>●●● ⌁ ▮</span></div>
+      <div class="screen">
+
+        <div class="profile-hd">
+          <div class="avatar">王</div>
+          <h2>王姐</h2>
+          <div class="meta">建材 · 认识 2 年 · 上次联系 10-03</div>
+          <div class="tags">
+            <span class="tag tag-accent">核心</span>
+            <span class="tag tag-success">价值高</span>
+            <span class="tag">哥姐 + 客户</span>
+          </div>
+        </div>
+
+        <div class="block">
+          <div class="block-hd">
+            <span class="t">AI 综述</span>
+            <span class="a">重写</span>
+          </div>
+          <div class="summary">
+            王姐，38 岁，做建材生意，有个上高二的女儿。
+            喜欢<span class="hl">喝白茶</span>、讨厌太甜的东西。最近<span class="hl">在装修</span>，
+            忌讳聊年龄。上次沟通 10-03。
+          </div>
+        </div>
+
+        <div class="block">
+          <div class="block-hd"><span class="t">标签</span></div>
+          <div class="tags" style="display:flex;gap:6px;flex-wrap:wrap">
+            <span class="tag">行业 建材</span>
+            <span class="tag">一女高二</span>
+            <span class="tag">偏好 白茶</span>
+            <span class="tag tag-warn">装修中 · 剩 2 月</span>
+            <span class="tag">忌聊年龄</span>
+          </div>
+        </div>
+
+        <div class="block">
+          <div class="block-hd"><span class="t">往来</span></div>
+          <div class="stat-row">
+            <div class="stat"><div class="k">他给我</div><div class="v">12,400</div></div>
+            <div class="stat"><div class="k">我给他</div><div class="v">3,200</div></div>
+          </div>
+        </div>
+
+        <div class="block">
+          <div class="block-hd">
+            <span class="t">时间线</span>
+            <span class="a">全部</span>
+          </div>
+          <div class="tl">
+            <div class="tl-item hot">
+              <div class="when">10-05</div>
+              <div class="what">打赏 <b>￥520</b></div>
+            </div>
+            <div class="tl-item hot">
+              <div class="when">10-03</div>
+              <div class="what">"最近在喝白茶，太甜的喝不了"</div>
+            </div>
+            <div class="tl-item">
+              <div class="when">09-28</div>
+              <div class="what">订单 <b>￥1,800</b> · 已结</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="tabbar">
+        <div class="tab"><div class="ico"></div>今日</div>
+        <div class="tab on"><div class="ico"></div>人</div>
+        <div class="tab"><div class="ico"></div>日历</div>
+        <div class="tab"><div class="ico"></div>待办</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 3. 提醒卡片 ============ -->
+  <div class="notify-wrap">
+    <p class="section-title">03 · 提醒卡片（企业微信内）</p>
+    <div class="phone" style="height:auto;padding-bottom:18px">
+      <div class="notch"></div>
+      <div class="statusbar"><span>9:41</span><span>●●● ⌁ ▮</span></div>
+
+      <div style="padding:6px 18px 18px">
+        <div class="wx-hd"><span>Keeper 机器人</span><span>08:00</span></div>
+
+        <div class="notify">
+          <div class="who-line">Keeper · 今天的提醒</div>
+          <div class="notify-card">
+
+            <div class="notify-top">
+              <span class="tag tag-accent">生日 · 还有 3 天</span>
+              <span class="h-sec" style="font-size:12.5px">王姐</span>
+            </div>
+
+            <div class="notify-body">
+
+              <div class="sug">
+                <div class="lab">建议下单</div>
+                <div class="val">白茶礼盒 <em>￥300-500</em></div>
+              </div>
+
+              <div class="reasons">
+                <div class="lab">依据</div>
+                <ul>
+                  <li>她 10-03 说过"最近在喝白茶"</li>
+                  <li>去年送的是香水，不重复</li>
+                  <li>档案忌讳聊年龄，话术已避开</li>
+                </ul>
+              </div>
+
+              <div class="script">
+                姐，这几天降温记得添衣。上次你说爱喝白茶，我托人带了点，不贵重，你尝尝。
+              </div>
+
+              <div class="notify-acts">
+                <button class="btn btn-primary btn-sm">转待办</button>
+                <button class="btn btn-ghost btn-sm">换一个</button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        <div class="notify" style="margin-top:12px">
+          <div class="notify-card">
+            <div class="notify-top">
+              <span class="tag tag-warn">结款 · 3 天后</span>
+              <span class="h-sec" style="font-size:12.5px">张总</span>
+            </div>
+            <div class="notify-body" style="padding-top:12px">
+              <div class="body-sm">订单 09-28 · 建材批发<br>
+                到期 <b style="color:var(--text)">10-30</b> · 金额 <b style="color:var(--text)">￥8,600</b></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <div class="tabbar" style="display:none"></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ============ 规范 ============ -->
+<div class="specs">
+
+  <div class="spec">
+    <h3>色板</h3>
+    <div class="swatches">
+      <div class="sw"><i style="background:#FAF7F2"></i><b>#FAF7F2</b><span>页面底</span></div>
+      <div class="sw"><i style="background:#FFFFFF"></i><b>#FFFFFF</b><span>卡片</span></div>
+      <div class="sw"><i style="background:#F7F2EA"></i><b>#F7F2EA</b><span>次级面</span></div>
+      <div class="sw"><i style="background:#EAE2D6"></i><b>#EAE2D6</b><span>边框</span></div>
+      <div class="sw"><i style="background:#2B2622"></i><b>#2B2622</b><span>主文字</span></div>
+      <div class="sw"><i style="background:#6E6459"></i><b>#6E6459</b><span>次文字</span></div>
+      <div class="sw"><i style="background:#9C9184"></i><b>#9C9184</b><span>三级</span></div>
+      <div class="sw"><i style="background:#D9694A"></i><b>#D9694A</b><span>主色</span></div>
+      <div class="sw"><i style="background:#FBEAE4"></i><b>#FBEAE4</b><span>主色浅底</span></div>
+      <div class="sw"><i style="background:#5B8C6E"></i><b>#5B8C6E</b><span>成功</span></div>
+      <div class="sw"><i style="background:#C08A2E"></i><b>#C08A2E</b><span>提醒</span></div>
+    </div>
+  </div>
+
+  <div class="spec">
+    <h3>字号层级</h3>
+    <ul class="scale">
+      <li><span class="sz">26/1.25</span><span class="demo" style="font-size:26px;letter-spacing:-.02em">今天两件事</span></li>
+      <li><span class="sz">20/1.3</span><span class="demo" style="font-size:20px">王姐</span></li>
+      <li><span class="sz">15/1.6</span><span class="demo" style="font-size:15px;font-weight:400">正文内容，用来读</span></li>
+      <li><span class="sz">13.5/1.65</span><span class="demo" style="font-size:13.5px;font-weight:400;color:#6E6459">次要说明文字</span></li>
+      <li><span class="sz">11.5/1.4</span><span class="demo" style="font-size:11.5px;font-weight:500;color:#9C9184;letter-spacing:.06em">标签 / 元信息</span></li>
+    </ul>
+    <p class="body-sm" style="margin-top:12px;font-size:12px">
+      最小可视字号 11px，手机正文不低于 13.5px。
+    </p>
+  </div>
+
+  <div class="spec">
+    <h3>圆角与间距</h3>
+    <ul class="rules">
+      <li>大卡片 <code>20px</code> · 中卡片 <code>14px</code></li>
+      <li>按钮 <code>10px</code> · 小按钮 <code>8px</code></li>
+      <li>标签一律胶囊 <code>999px</code></li>
+      <li>间距基数 <code>4px</code>，只用 4 的倍数</li>
+      <li>卡片内边距 <code>14-16px</code>，卡片间距 <code>10-12px</code></li>
+      <li>页面左右留白 <code>18px</code></li>
+    </ul>
+  </div>
+
+  <div class="spec">
+    <h3>按钮形态</h3>
+    <ul class="rules">
+      <li>主按钮：珊瑚实心，<b>一屏只有一个</b></li>
+      <li>次按钮：白底 + 边框，文字用次级灰</li>
+      <li>高度：常规 <code>38px</code> · 小号 <code>32px</code></li>
+      <li>不用阴影做按钮层次，用颜色</li>
+      <li>危险操作不放在首屏，收进「更多」</li>
+    </ul>
+  </div>
+
+  <div class="spec">
+    <h3>信息密度原则</h3>
+    <ul class="rules">
+      <li>一屏只服务一个动作：<b>看今天做什么</b></li>
+      <li>「今天该做的」<b>最多 3 条</b>，超出折叠</li>
+      <li>待确认卡片默认展示前 2 条</li>
+      <li>AI 综述控制在 3 行内，超出折行不折叠</li>
+      <li>不用表格，用卡片列表</li>
+    </ul>
+  </div>
+
+  <div class="spec">
+    <h3>颜色使用规则</h3>
+    <ul class="rules">
+      <li>珊瑚色<b>只用于</b>：主按钮、当前导航、关键数字背景</li>
+      <li>绿色只表示"已完成/高价值"，不做装饰色</li>
+      <li>警告色只用于"即将到期"和"低置信度"</li>
+      <li>禁止用颜色区分人物，用文字和标签</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>

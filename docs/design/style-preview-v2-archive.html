@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keeper · 设计样张 v2 · 私人档案</title>
+<style>
+  :root{
+    --paper:#F6F3EC;
+    --paper-2:#EFEAE0;
+    --paper-3:#E7E1D4;
+    --ink:#1C1A15;
+    --ink-2:#57514A;
+    --ink-3:#8C857A;
+    --rule:#D5CEBF;
+    --rule-soft:#E3DDD0;
+    --seal:#A63A2B;
+    --seal-soft:#F4E7E3;
+    --green:#4A5D52;
+
+    --serif:"Songti SC","STSong","Noto Serif SC","Source Han Serif SC",Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB",sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-font-smoothing:antialiased}
+  html{background:#E4DFD4}
+  body{
+    color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.65;
+    padding:48px 32px 80px;
+    background:
+      repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(28,26,21,.008) 3px,rgba(28,26,21,.008) 6px),
+      #E4DFD4;
+  }
+
+  /* ---------- 页头 ---------- */
+  .head{max-width:1280px;margin:0 auto 46px}
+  .head-top{
+    display:flex;align-items:baseline;gap:16px;
+    border-bottom:1px solid #C9C2B2;padding-bottom:14px;margin-bottom:18px;
+  }
+  .head-top h1{
+    font-family:var(--serif);font-size:34px;font-weight:600;letter-spacing:.16em;
+  }
+  .head-top .tag{
+    font-family:var(--mono);font-size:11px;color:#6B6459;letter-spacing:.18em;text-transform:uppercase;
+  }
+  .head p{font-size:13.5px;color:#57514A;line-height:1.8;max-width:680px}
+
+  .wrap{max-width:1280px;margin:0 auto}
+  .row{display:flex;gap:34px;flex-wrap:wrap;align-items:flex-start}
+  .cap{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;
+    color:#6B6459;text-transform:uppercase;margin-bottom:14px;
+  }
+
+  /* ---------- 手机 ---------- */
+  .phone{
+    width:375px;height:784px;flex:0 0 auto;position:relative;
+    display:flex;flex-direction:column;overflow:hidden;
+    background:var(--paper);
+    border:1px solid #C9C2B2;
+    border-radius:14px;
+    box-shadow:0 1px 0 #fff inset,0 18px 44px rgba(28,26,21,.13);
+  }
+  .phone::after{ /* 纸张纹理 */
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(28,26,21,.011) 3px,rgba(28,26,21,.011) 6px);
+  }
+  .bar{
+    height:42px;flex:0 0 auto;display:flex;align-items:flex-end;justify-content:space-between;
+    padding:0 20px 5px;font-family:var(--mono);font-size:10px;color:var(--ink-3);letter-spacing:.08em;
+    position:relative;z-index:2;
+  }
+  .screen{flex:1;overflow-y:auto;position:relative;z-index:2;scrollbar-width:none;padding:0 20px 96px}
+  .screen::-webkit-scrollbar{display:none}
+
+  /* ---------- 今日页 ---------- */
+  .masthead{
+    display:flex;justify-content:space-between;align-items:baseline;
+    padding:8px 0 10px;border-bottom:1px solid var(--ink);
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ink-2);
+    text-transform:uppercase;
+  }
+  .masthead b{font-weight:600;color:var(--ink)}
+
+  .today-title{padding:26px 0 22px}
+  .today-title .l1{
+    font-family:var(--serif);font-size:38px;line-height:1.18;font-weight:600;
+    letter-spacing:.06em;
+  }
+  .today-title .l2{
+    font-family:var(--serif);font-size:38px;line-height:1.18;font-weight:400;
+    letter-spacing:.06em;color:var(--ink-2);
+  }
+
+  .item{padding:16px 0;border-top:1px solid var(--rule)}
+  .item-hd{display:flex;gap:12px;align-items:baseline}
+  .num{
+    font-family:var(--mono);font-size:10.5px;color:var(--seal);
+    letter-spacing:.1em;flex:0 0 auto;padding-top:2px;
+  }
+  .item-bd{flex:1;min-width:0}
+  .item-t{font-size:17px;font-weight:600;letter-spacing:.01em;line-height:1.4}
+  .item-d{
+    font-size:13px;color:var(--ink-2);margin-top:5px;line-height:1.6;
+  }
+  .amount{
+    font-family:var(--mono);font-size:15px;font-weight:600;
+    font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:var(--ink);
+  }
+  .amount small{font-size:11px;font-weight:400;color:var(--ink-3);margin-left:2px}
+
+  .sec-hd{
+    display:flex;align-items:baseline;justify-content:space-between;
+    margin:30px 0 0;padding-bottom:9px;border-bottom:1px solid var(--ink);
+  }
+  .sec-hd .t{
+    font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--ink-2);
+  }
+  .sec-hd .n{font-family:var(--mono);font-size:10.5px;color:var(--seal);letter-spacing:.1em}
+
+  .pending{padding:15px 0;border-bottom:1px solid var(--rule-soft)}
+  .pending-top{display:flex;align-items:baseline;gap:8px;margin-bottom:7px}
+  .who{font-size:13px;font-weight:650;letter-spacing:.02em}
+  .kind{
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--ink-3);border:1px solid var(--rule);padding:1px 5px;
+  }
+  .conf{
+    margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-3);
+  }
+  .conf.low{color:var(--seal)}
+  .pending-txt{
+    font-family:var(--serif);font-size:16.5px;line-height:1.6;letter-spacing:.02em;
+    margin-bottom:11px;
+  }
+  .pending-src{
+    font-family:var(--mono);font-size:9.5px;color:var(--ink-3);letter-spacing:.06em;
+    margin-bottom:12px;
+  }
+  .acts{display:flex;gap:8px}
+  .b{
+    font-family:var(--sans);font-size:12.5px;font-weight:550;letter-spacing:.04em;
+    height:34px;padding:0 15px;border:1px solid var(--ink);background:transparent;
+    color:var(--ink);cursor:default;border-radius:1px;
+  }
+  .b-solid{background:var(--ink);color:var(--paper)}
+  .b-seal{border-color:var(--seal);color:var(--seal)}
+  .b-quiet{border-color:var(--rule);color:var(--ink-3)}
+
+  /* ---------- 印章 ---------- */
+  .stamp{
+    display:inline-flex;align-items:center;justify-content:center;
+    border:1.4px solid var(--seal);color:var(--seal);
+    font-family:var(--serif);font-size:10.5px;font-weight:600;
+    letter-spacing:.16em;padding:3px 7px 2px;border-radius:1.5px;
+    transform:rotate(-3.5deg);opacity:.82;
+    box-shadow:inset 0 0 0 .5px rgba(166,58,43,.25);
+  }
+
+  /* ---------- 底部导航 ---------- */
+  .tabs{
+    position:absolute;bottom:0;left:0;right:0;height:70px;z-index:3;
+    border-top:1px solid var(--ink);background:var(--paper);
+    display:flex;align-items:center;
+  }
+  .tab{
+    flex:1;text-align:center;font-family:var(--mono);font-size:9.5px;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);
+  }
+  .tab.on{color:var(--seal);font-weight:600}
+  .tab.on::before{
+    content:"";display:block;width:14px;height:1.5px;background:var(--seal);margin:0 auto 6px;
+  }
+  .tab:not(.on)::before{
+    content:"";display:block;width:14px;height:1.5px;background:var(--rule);margin:0 auto 6px;
+  }
+
+  /* ---------- 档案页 ---------- */
+  .file-no{
+    display:flex;justify-content:space-between;align-items:baseline;
+    padding:8px 0 10px;border-bottom:1px solid var(--ink);
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ink-2);
+  }
+  .file-no .no{color:var(--seal);font-weight:600}
+
+  .name-block{padding:24px 0 20px;border-bottom:1px solid var(--rule)}
+  .name-cn{
+    font-family:var(--serif);font-size:40px;font-weight:600;letter-spacing:.14em;
+    line-height:1.15;margin-bottom:6px;
+  }
+  .name-en{
+    font-family:var(--mono);font-size:10px;letter-spacing:.32em;color:var(--ink-3);
+    text-transform:uppercase;margin-bottom:14px;
+  }
+  .name-meta{
+    font-size:12.5px;color:var(--ink-2);line-height:1.7;
+  }
+  .name-meta span{color:var(--ink-3);margin:0 6px}
+
+  .field-hd{
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--ink-3);margin:22px 0 10px;
+  }
+  .summary{
+    font-family:var(--serif);font-size:16px;line-height:1.95;letter-spacing:.02em;
+    text-align:justify;
+  }
+  .summary em{
+    font-style:normal;
+    background:linear-gradient(transparent 68%,rgba(166,58,43,.14) 68%);
+    font-weight:600;
+  }
+
+  .kv{border-top:1px solid var(--rule-soft)}
+  .kv-row{
+    display:flex;gap:14px;padding:8px 0;border-bottom:1px solid var(--rule-soft);
+    align-items:baseline;
+  }
+  .kv-k{
+    font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--ink-3);width:44px;flex:0 0 auto;
+  }
+  .kv-v{font-size:13.5px;line-height:1.6;flex:1}
+
+  .money{display:flex;gap:0;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule)}
+  .money-cell{flex:1;padding:13px 0}
+  .money-cell + .money-cell{border-left:1px solid var(--rule);padding-left:16px}
+  .money-k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;color:var(--ink-3);text-transform:uppercase;margin-bottom:4px}
+  .money-v{font-family:var(--mono);font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+  .rec{display:flex;gap:14px;padding:10px 0;border-bottom:1px solid var(--rule-soft);align-items:baseline}
+  .rec .when{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);width:40px;flex:0 0 auto;letter-spacing:.02em}
+  .rec .what{font-size:13.5px;line-height:1.55;flex:1}
+  .rec .what b{font-family:var(--mono);font-weight:600;font-variant-numeric:tabular-nums}
+  .rec .what i{font-family:var(--serif);font-style:normal;color:var(--ink-2)}
+
+  /* ---------- 便笺 ---------- */
+  .note-wrap{width:375px;flex:0 0 auto}
+  .note-bg{
+    background:var(--paper);border:1px solid #C9C2B2;border-radius:14px;
+    padding:26px 22px 22px;position:relative;overflow:hidden;
+    box-shadow:0 18px 44px rgba(28,26,21,.13);
+  }
+  .note-bg::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(28,26,21,.011) 3px,rgba(28,26,21,.011) 6px);
+  }
+  .note-hd{
+    display:flex;justify-content:space-between;align-items:center;
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;color:var(--ink-3);
+    text-transform:uppercase;padding-bottom:10px;border-bottom:1px solid var(--ink);
+    position:relative;z-index:2;
+  }
+  .note-body{position:relative;z-index:2;padding-top:18px}
+
+  .note-kicker{
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--seal);margin-bottom:8px;
+  }
+  .note-title{
+    font-family:var(--serif);font-size:26px;font-weight:600;letter-spacing:.06em;
+    line-height:1.35;margin-bottom:6px;
+  }
+  .note-sub{font-size:12.5px;color:var(--ink-2);margin-bottom:20px}
+
+  .sug{
+    border-left:2px solid var(--seal);padding:2px 0 2px 13px;margin-bottom:20px;
+  }
+  .sug-k{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
+  .sug-v{font-size:19px;font-weight:600;letter-spacing:.01em}
+  .sug-v .p{font-family:var(--mono);font-size:14px;font-weight:500;color:var(--ink-2);margin-left:8px;letter-spacing:-.01em}
+
+  .why-hd{
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--ink-3);margin-bottom:8px;
+  }
+  .why li{
+    list-style:none;font-size:12.5px;line-height:1.75;color:var(--ink-2);
+    padding-left:14px;position:relative;margin-bottom:3px;
+  }
+  .why li::before{
+    content:"";position:absolute;left:0;top:7px;width:5px;height:1px;background:var(--rule);
+  }
+  .why{margin-bottom:20px}
+
+  .quote{
+    font-family:var(--serif);font-size:15px;line-height:1.95;letter-spacing:.02em;
+    padding:14px 15px;background:var(--paper-2);border:1px solid var(--rule-soft);
+    margin-bottom:20px;position:relative;
+  }
+  .quote::before{
+    content:"“";position:absolute;left:8px;top:4px;font-size:26px;color:var(--rule);
+    font-family:var(--serif);
+  }
+  .quote p{padding-left:14px}
+
+  .note-acts{display:flex;gap:9px;align-items:center}
+  .note-acts .b{flex:1}
+
+  .stamp-abs{
+    position:absolute;right:18px;bottom:16px;
+    transform:rotate(-7deg);opacity:.5;z-index:2;
+  }
+  .stamp-lg{
+    border:2px solid var(--seal);color:var(--seal);
+    font-family:var(--serif);font-size:15px;font-weight:600;letter-spacing:.2em;
+    padding:5px 10px 4px;border-radius:2px;
+  }
+
+  /* ---------- 规范区 ---------- */
+  .specs{
+    max-width:1280px;margin:70px auto 0;
+    display:grid;grid-template-columns:repeat(auto-fit,minmax(292px,1fr));gap:0;
+    border-top:1px solid #C9C2B2;border-left:1px solid #C9C2B2;
+  }
+  .spec{
+    background:var(--paper);padding:22px;border-right:1px solid #C9C2B2;border-bottom:1px solid #C9C2B2;
+  }
+  .spec h3{
+    font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--ink-3);margin-bottom:16px;
+  }
+  .sw{display:flex;flex-wrap:wrap;gap:1px;border:1px solid var(--rule)}
+  .sw i{width:calc(25% - 1px);height:46px;display:block}
+  .legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:12px}
+  .legend div{font-family:var(--mono);font-size:9.5px;color:var(--ink-3);letter-spacing:.04em}
+  .legend b{display:inline-block;width:8px;height:8px;margin-right:5px;border:1px solid rgba(0,0,0,.12)}
+
+  .type-row{display:flex;align-items:baseline;gap:12px;padding:7px 0;border-bottom:1px dotted var(--rule)}
+  .type-row .lbl{font-family:var(--mono);font-size:9px;color:var(--ink-3);width:52px;flex:0 0 auto;letter-spacing:.04em}
+
+  .rst li{
+    list-style:none;font-size:12px;line-height:1.8;color:var(--ink-2);
+    padding-left:15px;position:relative;margin-bottom:5px;
+  }
+  .rst li::before{content:"·";position:absolute;left:3px;color:var(--seal);font-weight:700}
+  .rst code{
+    font-family:var(--mono);font-size:10.5px;background:var(--paper-2);
+    padding:1px 4px;border:1px solid var(--rule-soft);
+  }
+</style>
+</head>
+<body>
+
+<div class="head">
+  <div class="head-top">
+    <h1>KEEPER</h1>
+    <span class="tag">Design Direction 02 / The Archive</span>
+  </div>
+  <p>
+    私人档案的方向。每个人是一份档案，每次确认是一次盖章。<br>
+    靠字号、留白和横线建立层次，不靠卡片阴影；纸底有纤维纹理；朱红只出现在真正需要看见的地方。
+  </p>
+</div>
+
+<div class="wrap">
+<div class="row">
+
+  <!-- ========== 今日 ========== -->
+  <div>
+    <p class="cap">01 — 今日</p>
+    <div class="phone">
+      <div class="bar"><span>09:41</span><span>— 27 OCT —</span></div>
+      <div class="screen">
+
+        <div class="masthead">
+          <span><b>KEEPER</b> / 档案室</span>
+          <span>2026.10.27</span>
+        </div>
+
+        <div class="today-title">
+          <div class="l1">今天</div>
+          <div class="l2">两件事</div>
+        </div>
+
+        <div class="item">
+          <div class="item-hd">
+            <span class="num">01</span>
+            <div class="item-bd">
+              <div class="item-t">王姐生日</div>
+              <div class="item-d">还有 3 天 · 建议白茶礼盒</div>
+            </div>
+            <div class="amount">300<small>–500</small></div>
+          </div>
+        </div>
+
+        <div class="item">
+          <div class="item-hd">
+            <span class="num">02</span>
+            <div class="item-bd">
+              <div class="item-t">张总结款</div>
+              <div class="item-d">3 天后到期 · 订单 09-28</div>
+            </div>
+            <div class="amount">8,600</div>
+          </div>
+        </div>
+
+        <div class="sec-hd">
+          <span class="t">待确认</span>
+          <span class="n">03 条</span>
+        </div>
+
+        <div class="pending">
+          <div class="pending-top">
+            <span class="who">王姐</span>
+            <span class="kind">偏好</span>
+            <span class="conf">0.92</span>
+          </div>
+          <div class="pending-txt">最近在喝白茶</div>
+          <div class="pending-src">10-03 聊天 · 第 3 屏 · 查看原图</div>
+          <div class="acts">
+            <button class="b b-solid">记下</button>
+            <button class="b b-quiet">不记</button>
+            <button class="b b-quiet">改</button>
+          </div>
+        </div>
+
+        <div class="pending">
+          <div class="pending-top">
+            <span class="who">张总</span>
+            <span class="kind">家庭</span>
+            <span class="conf low">0.68</span>
+          </div>
+          <div class="pending-txt">女儿明年去英国读书</div>
+          <div class="pending-src">10-26 聊天 · 第 1 屏 · 查看原图</div>
+          <div class="acts">
+            <button class="b b-solid">记下</button>
+            <button class="b b-quiet">不记</button>
+            <button class="b b-quiet">改</button>
+          </div>
+        </div>
+
+      </div>
+      <div class="tabs">
+        <div class="tab on">今日</div>
+        <div class="tab">人</div>
+        <div class="tab">日历</div>
+        <div class="tab">待办</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 档案 ========== -->
+  <div>
+    <p class="cap">02 — 档案</p>
+    <div class="phone">
+      <div class="bar"><span>09:41</span><span>— 27 OCT —</span></div>
+      <div class="screen">
+
+        <div class="file-no">
+          <span>档案 / PERSON FILE</span>
+          <span class="no">No. 019</span>
+        </div>
+
+        <div class="name-block">
+          <div class="name-cn">王姐</div>
+          <div class="name-en">Wang Jie</div>
+          <div class="name-meta">
+            建材<span>·</span>核心<span>·</span>认识 2 年<span>·</span>上次 10-03
+          </div>
+        </div>
+
+        <div class="field-hd">摘要 / Summary</div>
+        <div class="summary">
+          三十八岁，做<em>建材</em>生意，有个上高二的女儿。
+          喝<em>白茶</em>，不碰甜的。最近在<em>装修</em>，别聊年龄。
+        </div>
+
+        <div class="field-hd">字段 / Fields</div>
+        <div class="kv">
+          <div class="kv-row"><span class="kv-k">行业</span><span class="kv-v">建材</span></div>
+          <div class="kv-row"><span class="kv-k">家庭</span><span class="kv-v">一女 · 高二</span></div>
+          <div class="kv-row"><span class="kv-k">偏好</span><span class="kv-v">白茶 · 不喜甜</span></div>
+          <div class="kv-row"><span class="kv-k">场景</span><span class="kv-v">装修中（剩 2 月）</span></div>
+          <div class="kv-row"><span class="kv-k">禁忌</span><span class="kv-v">忌聊年龄</span></div>
+        </div>
+
+        <div class="field-hd">往来 / Ledger</div>
+        <div class="money">
+          <div class="money-cell">
+            <div class="money-k">他给我</div>
+            <div class="money-v">12,400</div>
+          </div>
+          <div class="money-cell">
+            <div class="money-k">我给他</div>
+            <div class="money-v">3,200</div>
+          </div>
+        </div>
+
+        <div class="field-hd">记录 / Records</div>
+        <div class="rec"><span class="when">10-05</span><span class="what">打赏 <b>￥520</b></span></div>
+        <div class="rec"><span class="when">10-03</span><span class="what"><i>“最近在喝白茶，太甜的喝不了”</i></span></div>
+        <div class="rec"><span class="when">09-28</span><span class="what">订单 <b>￥1,800</b> · 已结</span></div>
+
+      </div>
+      <div class="tabs">
+        <div class="tab">今日</div>
+        <div class="tab on">人</div>
+        <div class="tab">日历</div>
+        <div class="tab">待办</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== 提醒便笺 ========== -->
+  <div class="note-wrap">
+    <p class="cap">03 — 提醒便笺</p>
+    <div class="note-bg">
+      <div class="note-hd">
+        <span>Keeper / 08:00</span>
+        <span>便笺</span>
+      </div>
+
+      <div class="note-body">
+
+        <div class="note-kicker">生日 · 还有 3 天</div>
+        <div class="note-title">王姐</div>
+        <div class="note-sub">建材 · 核心 · 认识 2 年</div>
+
+        <div class="sug">
+          <div class="sug-k">建议下单</div>
+          <div class="sug-v">白茶礼盒<span class="p">￥300–500</span></div>
+        </div>
+
+        <div class="why-hd">依据</div>
+        <ul class="why">
+          <li>她 10-03 说过「最近在喝白茶」</li>
+          <li>去年送的是香水，不重复</li>
+          <li>忌讳聊年龄，话术已避开</li>
+        </ul>
+
+        <div class="quote">
+          <p>姐，这几天降温记得添衣。上次你说爱喝白茶，我托人带了点，不贵重，你尝尝。</p>
+        </div>
+
+        <div class="note-acts">
+          <button class="b b-seal">转待办</button>
+          <button class="b b-quiet">换一个</button>
+        </div>
+
+      </div>
+
+      <div class="stamp-abs">
+        <div class="stamp-lg">待办</div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px;display:flex;align-items:center;gap:10px">
+      <div class="stamp">已记</div>
+      <span style="font-size:11.5px;color:#57514A;line-height:1.6">
+        每条确认后盖一次章<br>一天十次，一个月三百次
+      </span>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<!-- ========== 规范 ========== -->
+<div class="specs">
+
+  <div class="spec">
+    <h3>色板 / Palette</h3>
+    <div class="sw">
+      <i style="background:#F6F3EC"></i>
+      <i style="background:#EFEAE0"></i>
+      <i style="background:#D5CEBF"></i>
+      <i style="background:#8C857A"></i>
+      <i style="background:#57514A"></i>
+      <i style="background:#1C1A15"></i>
+      <i style="background:#A63A2B"></i>
+      <i style="background:#4A5D52"></i>
+    </div>
+    <div class="legend">
+      <div><b style="background:#F6F3EC"></b>纸 #F6F3EC</div>
+      <div><b style="background:#EFEAE0"></b>纸暗 #EFEAE0</div>
+      <div><b style="background:#D5CEBF"></b>线 #D5CEBF</div>
+      <div><b style="background:#8C857A"></b>三 #8C857A</div>
+      <div><b style="background:#57514A"></b>二 #57514A</div>
+      <div><b style="background:#1C1A15"></b>墨 #1C1A15</div>
+      <div><b style="background:#A63A2B"></b>印 #A63A2B</div>
+      <div><b style="background:#4A5D52"></b>绿 #4A5D52</div>
+    </div>
+  </div>
+
+  <div class="spec">
+    <h3>字体 / Type</h3>
+    <div class="type-row">
+      <span class="lbl">Display</span>
+      <span style="font-family:var(--serif);font-size:32px;font-weight:600;letter-spacing:.06em">两件事</span>
+    </div>
+    <div class="type-row">
+      <span class="lbl">Serif 16</span>
+      <span style="font-family:var(--serif);font-size:16px;line-height:1.9">最近在喝白茶</span>
+    </div>
+    <div class="type-row">
+      <span class="lbl">Sans 15</span>
+      <span style="font-size:15px">正文与操作</span>
+    </div>
+    <div class="type-row">
+      <span class="lbl">Mono 10</span>
+      <span style="font-family:var(--mono);font-size:10px;letter-spacing:.2em">2026.10.27 / 08:00</span>
+    </div>
+    <ul class="rst" style="margin-top:12px">
+      <li>标题衬线（Songti SC），正文黑体，数字与编号等宽</li>
+      <li>三层足矣：Display 32-40 / Body 13.5-16 / Meta 9.5-10.5</li>
+    </ul>
+  </div>
+
+  <div class="spec">
+    <h3>结构与留白</h3>
+    <ul class="rst">
+      <li><b>不用卡片</b>，用横线切分区块</li>
+      <li>区块间距 <code>22-30px</code>，条目内间距 <code>8-10px</code></li>
+      <li>页面左右留白 <code>20px</code>（手机）</li>
+      <li>圆角只有两种：<code>1px</code>（按钮/标签）和 <code>14px</code>（设备外壳）</li>
+      <li>阴影只给浮层（便笺、弹窗），列表项一律无阴影</li>
+    </ul>
+  </div>
+
+  <div class="spec">
+    <h3>层级建立方式</h3>
+    <ul class="rst">
+      <li><b>字号</b>：38 → 17 → 13.5 → 10</li>
+      <li><b>字体族</b>：衬线标题 / 黑体正文 / 等宽元数据</li>
+      <li><b>横线</b>：实线 <code>1px #1C1A15</code> 分大区块，细线 <code>#D5CEBF</code> 分条目</li>
+      <li><b>不用</b>：阴影、渐变、图标、彩色背景块</li>
+    </ul>
+  </div>
+
+  <div class="spec">
+    <h3>颜色纪律</h3>
+    <ul class="rst">
+      <li>朱红 <code>#A63A2B</code> 只用于：编号、印章、今日导航、低置信度</li>
+      <li>墨绿 <code>#4A5D52</code> 只用于「已完成 / 已结清」</li>
+      <li>其余全部是纸与墨的明度变化</li>
+      <li>一屏之内朱红出现不超过 4 次</li>
+    </ul>
+  </div>
+
+  <div class="spec">
+    <h3>那个章</h3>
+    <ul class="rst">
+      <li>确认一条事实 → 盖「已记」</li>
+      <li>提醒转成待办 → 盖「待办」</li>
+      <li>章是斜的、有边框、半透明，像手盖的</li>
+      <li>它不参与布局，浮在角落，不挡信息</li>
+    </ul>
+  </div>
+
+</div>
+
+</body>
+</html>
