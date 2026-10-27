@@ -6,7 +6,7 @@
 >
 > **本文的效力**：新增依赖、调整目录、自定义错误码、更换框架——**都必须先改本文，写明原因，再动代码。**
 >
-> 版本：v2.0 · 2026-10-28
+> 版本：v2.1 · 2026-10-28
 
 ---
 
@@ -509,15 +509,96 @@ backend/
 
 **第 2 条最重要**：它保证核心逻辑（抽取、画像、提醒、温度）能脱离 HTTP 单独测试。**这也是后面做对比实验的基础。**
 
-### 11.3 每个目录的职责边界
+### 11.3 目录责任表
 
-| 目录 | 能有 | 不能有 |
+来源标记：**【框架】** = FastAPI / Starlette 官方推荐或框架本身约定 · **【项目】** = 本项目自定义 · **【工具】** = 第三方工具的约定
+
+| 目录 / 文件 | 主要职责 | 以后应该放什么 | 禁止放什么 | 对应的框架机制 | 示例文件 | 来源 |
+|---|---|---|---|---|---|---|
+| `app/main.py` | 应用入口 | `lifespan`、中间件、CORS、异常处理器注册、`include_router` | 任何路由函数、任何业务逻辑、任何数据库查询 | `FastAPI()`、`@app.middleware`、`include_router` | `main.py`（99 行） | 【框架】 |
+| `app/config.py` | 读配置 | 所有环境变量字段 + 默认值 + 校验 | 业务常量（如预算档位）、密钥明文 | `pydantic-settings.BaseSettings` | `config.py`（65 行） | 【项目】 |
+| `app/db.py` | 数据库连接 | 引擎、`SessionLocal`、连接池参数、连通性探测 | 查询语句、表定义、业务逻辑 | SQLAlchemy `create_async_engine` / `async_sessionmaker` | `db.py`（49 行） | 【项目】 |
+| `app/deps.py` | 请求级依赖 | 当前用户、db session、分页、角色校验 | 业务规则、直接返回响应体 | FastAPI `Depends` + `yield` 依赖 | `deps.py`（103 行） | 【框架】<br>（官方叫 `dependencies.py`） |
+| `app/core/errors.py` | 错误体系 | `AppError`、`ErrorCode` 枚举、全局异常处理器 | 具体业务错误文案、SQL | `@app.exception_handler` | `errors.py`（99 行） | 【项目】 |
+| `app/core/logging.py` | 日志体系 | `JsonFormatter`、`setup_logging` | 业务日志调用（应在各处 `logger.info`） | 标准库 `logging` | `logging.py`（53 行） | 【项目】 |
+| `app/core/response.py` | 响应包装 | `ok()`、`paginated()` | 具体接口的字段定义 | 无（纯工具函数） | `response.py`（19 行） | 【项目】 |
+| `app/core/security.py` | 安全原语 | argon2 哈希、cookie 签发、CSRF token | 登录流程编排（属 service） | 无（`argon2-cffi` / `itsdangerous`） | ⚠️ 未创建 | 【项目】 |
+| `app/api/router.py` | 路由汇总 | 每个模块一行 `include_router` | 任何路由函数本体 | `APIRouter(prefix="/api")` | `router.py`（15 行） | 【框架】 |
+| `app/api/*.py` | 路由层 | 一个业务模块一个文件：取参数、调 service、返回；**该模块的请求/响应模型** | 数据库查询、业务判断、模型调用、超过 30 行的函数 | `APIRouter`、`response_model`、`Depends` | `api/health.py`（35 行） | 【框架】 |
+| `app/models/` | 表定义 | SQLModel 类：字段、约束、关系、`__tablename__` | 任何 `select()` / `session.exec()`、业务方法 | SQLModel / SQLAlchemy 2.0 | ⚠️ 待填（12 张表） | 【项目】 |
+| `app/services/` | 业务逻辑 | 一条业务主线的完整实现，可脱离 HTTP 单测 | `from fastapi import Request`、`JSONResponse` | 无（纯 Python，方便 pytest） | ⚠️ 待填 | 【项目】 |
+| `app/jobs/` | 定时任务 | 任务入口函数，内部调 service | 业务逻辑（应下沉到 service） | `APScheduler` | ⚠️ 待填（每日扫事件） | 【项目】 |
+| `alembic/versions/` | 迁移脚本 | 每个版本一个文件，顶部写清对应文档与回滚影响 | 手工改库留下的临时 SQL | Alembic | ⚠️ 待填（`0001_initial_schema`） | 【工具】 |
+| `prompts/` | 提示词 | 带版本号的 prompt 文件（`v1_extract.md`） | prompt 字符串常量散落在代码里 | 无 | ⚠️ 待填 | 【项目】 |
+| `tests/` | 测试 | `tests/services/` 单测、`tests/api/` 接口测试 | 依赖真实网络的测试 | `pytest` + `TestClient` | `test_health.py`（40 行） | 【工具】 |
+
+### 11.3.1 请求/响应模型放哪（一个待定项）
+
+ARCHITECTURE 9.2 要求"请求模型和响应模型分开"，但**没说放哪个目录**。本项目的决定：
+
+| 情况 | 放哪 |
+|---|---|
+| 该模块只有 1-3 个模型 | **直接写在 `api/xxx.py` 顶部**（接口契约跟路由走） |
+| 超过 50 行 | 拆到 `api/schemas/xxx.py` |
+| 是表的直接映射（增删改查不需要额外字段） | 复用 `models/` 里的 SQLModel |
+
+**不新建 `app/schemas/` 根目录**——模型是接口契约，跟 `api/` 走更近。
+
+### 11.4 六个关键位置（请求怎么流转）
+
+```
+HTTP 请求
+   │
+   ▼
+① 请求入口 ────────────── app/main.py
+   │                       · access_log 中间件：生成 trace_id、记耗时、打日志
+   │                       · CORS 中间件
+   ▼
+② 路由 ────────────────── app/api/router.py → app/api/xxx.py
+   │                       · APIRouter 匹配路径
+   │                       · 参数校验（Pydantic 自动，失败 → 400 VALIDATION_ERROR）
+   ▼
+③ 权限校验 ────────────── app/deps.py（通过 Depends 注入）
+   │                       · get_current_user   → 认证，失败 401
+   │                       · get_session        → SET LOCAL app.user_id，RLS 生效
+   │                       · require_owner      → 角色，失败 403
+   ▼
+④ 业务规则 ────────────── app/services/xxx.py
+   │                       · 业务判断、状态流转、调外部 API
+   │                       · 不 import fastapi（保证可单测）
+   ▼
+⑤ 数据库访问 ──────────── app/services/（查询） + app/models/（表定义）
+   │                       · session 由 get_session 注入，已带 RLS 变量
+   │                       · 查询**不写** where user_id
+   ▼
+⑥ 错误处理 ────────────── app/core/errors.py
+   │                       · service 抛 AppError → 全局 handler
+   │                       · Pydantic 抛 ValidationError → 全局 handler
+   │                       · 未捕获 → 500，堆栈只进日志
+   ▼
+返回
+   · 成功：{ "data": ..., "meta": ... }
+   · 失败：{ "error": { "code": ..., "message": ... } }
+```
+
+#### 六个问题，逐条对应到文件和机制
+
+| 问题 | 答案 | 文件 | 机制 |
+|---|---|---|---|
+| **请求入口在哪？** | HTTP 进来的第一站是 `main.py`，路由匹配在 `api/` | `app/main.py`<br>`app/api/*.py` | 中间件链 + `include_router` |
+| **业务规则在哪？** | 全在 `services/`，一行都不写在路由里 | `app/services/` | 无框架机制，纯 Python（这是设计目的） |
+| **数据库访问在哪？** | 引擎在 `db.py`，session 在 `deps.py` 注入，**查询在 `services/`** | `app/db.py`<br>`app/deps.py`<br>`app/services/` | SQLAlchemy 引擎 + FastAPI `Depends` + `SET LOCAL` |
+| **参数校验在哪？** | 路由函数签名上的 Pydantic 模型，**框架自动执行** | `app/api/*.py`（模型定义在同文件） | Pydantic v2 + FastAPI 自动绑定 |
+| **错误处理在哪？** | 四个全局处理器集中在 `core/errors.py`，在 `main.py` 注册 | `app/core/errors.py` | `@app.exception_handler` |
+| **权限校验入口在哪？** | 三层，全部在 `deps.py`，通过路由的 `Depends()` 挂载 | `app/deps.py` | FastAPI `Depends` + PostgreSQL RLS |
+
+#### 三层权限的分工（再强调一次）
+
+| 层 | 谁做 | 失败表现 |
 |---|---|---|
-| `api/` | 取参数、调 service、返回模型 | 数据库查询、业务判断、模型调用 |
-| `services/` | 业务逻辑、数据库查询、调外部 API | `fastapi` 的 Request / Response |
-| `models/` | 表字段、约束、关系 | 查询、业务方法 |
-| `core/` | 安全、错误、日志的通用实现 | 业务逻辑 |
-| `jobs/` | 定时任务入口，调 service | 业务逻辑（应放 service） |
+| ① 认证 | `get_current_user` | 401 `UNAUTHENTICATED` |
+| ② 数据隔离 | `get_session` 的 `SET LOCAL` + **数据库 RLS** | 查不到 → **404**（不是 403） |
+| ③ 功能权限 | `require_owner` | 403 `FORBIDDEN` |
 
 ---
 
@@ -928,3 +1009,4 @@ async def create_user(..., _: User = Depends(require_owner)):
 |---|---|---|
 | 2026-10-28 | v1.0 | 首版：业务边界 + 工程规则 |
 | 2026-10-28 | v2.0 | 补齐四块：① 为什么不选 Django/Flask（逐项对比）；② Python 语言规范 10 节（类型/命名/异常/异步/禁止清单）；③ FastAPI 最佳实践 5 组 + **框架最大化利用原则 22 行对照表**；④ 数据库连接方式与权限三入口（含 `SET LOCAL` vs `SET` 的坑）。同时修正 v1.0 中一处误植文本 |
+| 2026-10-28 | v2.1 | 11.3 从"职责边界"升级为**目录责任表**（15 行 × 7 列：职责/该放/禁放/框架机制/示例/来源）；新增 11.3.1 请求响应模型放哪的决策、11.4 六个关键位置与请求流转图 |
