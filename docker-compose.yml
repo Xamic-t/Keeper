@@ -5,8 +5,8 @@ services:
   db:
     image: pgvector/pgvector:pg17
     environment:
-      POSTGRES_DB: zhiren
-      POSTGRES_USER: zhiren
+      POSTGRES_DB: keeper
+      POSTGRES_USER: keeper
       POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 里设置 DB_PASSWORD}
     volumes:
       - pg_data:/var/lib/postgresql/data
@@ -15,7 +15,7 @@ services:
       - "127.0.0.1:5432:5432"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U zhiren -d zhiren"]
+      test: ["CMD-SHELL", "pg_isready -U keeper -d keeper"]
       interval: 10s
       retries: 5
 
