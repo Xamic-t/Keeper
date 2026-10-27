@@ -1,4 +1,8 @@
-"""统一响应格式。成功统一 {data, meta}；失败见 core/errors.py。"""
+"""统一响应格式。成功统一 {data, meta?}；失败见 core/errors.py。
+
+分页响应（meta.total / page / size）等第一个列表接口出现时再加，
+现在不预留——见 ARCHITECTURE 19.6。
+"""
 
 from typing import Any
 
@@ -9,11 +13,3 @@ def ok(data: Any, meta: dict[str, Any] | None = None) -> dict[str, Any]:
     if meta is not None:
         payload["meta"] = meta
     return payload
-
-
-def paginated(items: list[Any], total: int, page: int, size: int) -> dict[str, Any]:
-    """分页响应体。"""
-    return {
-        "data": items,
-        "meta": {"total": total, "page": page, "size": size},
-    }

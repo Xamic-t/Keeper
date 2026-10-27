@@ -1,16 +1,19 @@
-"""依赖注入。所有可复用的请求级对象都在这里定义，路由不重复写。
+"""依赖注入。只放**所有业务路由都必须经过**的骨架机制。
 
-三个权限入口：
-  ① get_current_user  —— 认证（未实现，W2 补）
-  ② get_session       —— 注入 RLS 变量，做数据隔离
-  ③ require_owner     —— 功能权限（管理员）
+判断一个依赖该不该放这里，问一句：
+    它是"每个业务路由都要挂的"，还是"某个功能专用的工具"？
+前者留下，后者等到真有接口用了再加（见 ARCHITECTURE 19.6）。
+
+当前只有两个骨架：
+  ① get_current_user —— 认证入口
+  ② get_session      —— 注入 RLS 变量，数据隔离的开关
 """
 
 import logging
 from collections.abc import AsyncGenerator
 from typing import Annotated, Literal
 
-from fastapi import Depends, Query, status
+from fastapi import Depends, status
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,18 +30,6 @@ class CurrentUser(BaseModel):
     id: int
     username: str
     role: Literal["owner", "member"] = "member"
-
-
-class Pagination(BaseModel):
-    """分页参数。"""
-
-    page: int = 1
-    size: int = 20
-
-    @property
-    def offset(self) -> int:
-        """SQL OFFSET 值。"""
-        return (self.page - 1) * self.size
 
 
 async def get_current_user() -> CurrentUser:
@@ -58,46 +49,15 @@ async def get_current_user() -> CurrentUser:
     )
 
 
-async def require_owner(
-    user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> CurrentUser:
-    """管理员专用。用在 /api/admin/* 的路由上。"""
-    if user.role != "owner":
-        raise AppError(
-            ErrorCode.FORBIDDEN,
-            "没有权限",
-            status_code=status.HTTP_403_FORBIDDEN,
-        )
-    return user
-
-
-async def get_raw_session() -> AsyncGenerator[AsyncSession]:
-    """系统级 session，**不带 RLS 变量**。
-
-    只允许三处使用：登录、健康检查、定时任务。
-    业务路由一律用 get_session。
-    """
-    async with SessionLocal() as session:
-        yield session
-
-
 async def get_session(
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> AsyncGenerator[AsyncSession]:
     """业务 session，注入 RLS 变量。
 
-    这一行 SET LOCAL 是 RLS 的开关，不能省，也不能换成 SET。
+    这一行 SET LOCAL 是 RLS 的开关，不能省，也不能换成 SET：
       - 忘了写 → RLS 拿不到变量 → 查询直接报错（比静默泄漏好）
       - 用 SET  → 变量活到连接归还，连接池复用时下一个人会用你的 user_id
     """
     async with SessionLocal() as session:
         await session.execute(text("SET LOCAL app.user_id = :uid"), {"uid": user.id})
         yield session
-
-
-def get_pagination(
-    page: Annotated[int, Query(ge=1)] = 1,
-    size: Annotated[int, Query(ge=1, le=100)] = 20,
-) -> Pagination:
-    """分页依赖。"""
-    return Pagination(page=page, size=size)

@@ -518,10 +518,10 @@ backend/
 | `app/main.py` | 应用入口 | `lifespan`、中间件、CORS、异常处理器注册、`include_router` | 任何路由函数、任何业务逻辑、任何数据库查询 | `FastAPI()`、`@app.middleware`、`include_router` | `main.py`（99 行） | 【框架】 |
 | `app/config.py` | 读配置 | 所有环境变量字段 + 默认值 + 校验 | 业务常量（如预算档位）、密钥明文 | `pydantic-settings.BaseSettings` | `config.py`（65 行） | 【项目】 |
 | `app/db.py` | 数据库连接 | 引擎、`SessionLocal`、连接池参数、连通性探测 | 查询语句、表定义、业务逻辑 | SQLAlchemy `create_async_engine` / `async_sessionmaker` | `db.py`（49 行） | 【项目】 |
-| `app/deps.py` | 请求级依赖 | 当前用户、db session、分页、角色校验 | 业务规则、直接返回响应体 | FastAPI `Depends` + `yield` 依赖 | `deps.py`（103 行） | 【框架】<br>（官方叫 `dependencies.py`） |
+| `app/deps.py` | 请求级依赖 | **只放骨架**：认证入口、RLS 会话开关 | 功能专用工具（分页、角色校验、raw session），等有调用者再加（见 19.6） | FastAPI `Depends` + `yield` 依赖 | `deps.py`（63 行） | 【框架】<br>（官方叫 `dependencies.py`） |
 | `app/core/errors.py` | 错误体系 | `AppError`、`ErrorCode` 枚举、全局异常处理器 | 具体业务错误文案、SQL | `@app.exception_handler` | `errors.py`（99 行） | 【项目】 |
 | `app/core/logging.py` | 日志体系 | `JsonFormatter`、`setup_logging` | 业务日志调用（应在各处 `logger.info`） | 标准库 `logging` | `logging.py`（53 行） | 【项目】 |
-| `app/core/response.py` | 响应包装 | `ok()`、`paginated()` | 具体接口的字段定义 | 无（纯工具函数） | `response.py`（19 行） | 【项目】 |
+| `app/core/response.py` | 响应包装 | `ok()`（分页等真有调用者时再加） | 具体接口的字段定义 | 无（纯工具函数） | `response.py`（15 行） | 【项目】 |
 | `app/core/security.py` | 安全原语 | argon2 哈希、cookie 签发、CSRF token | 登录流程编排（属 service） | 无（`argon2-cffi` / `itsdangerous`） | ⚠️ 未创建 | 【项目】 |
 | `app/api/router.py` | 路由汇总 | 每个模块一行 `include_router` | 任何路由函数本体 | `APIRouter(prefix="/api")` | `router.py`（15 行） | 【框架】 |
 | `app/api/*.py` | 路由层 | 一个业务模块一个文件：取参数、调 service、返回；**该模块的请求/响应模型** | 数据库查询、业务判断、模型调用、超过 30 行的函数 | `APIRouter`、`response_model`、`Depends` | `api/health.py`（35 行） | 【框架】 |
@@ -561,7 +561,7 @@ HTTP 请求
 ③ 权限校验 ────────────── app/deps.py（通过 Depends 注入）
    │                       · get_current_user   → 认证，失败 401
    │                       · get_session        → SET LOCAL app.user_id，RLS 生效
-   │                       · require_owner      → 角色，失败 403
+   │                       · （角色校验：待 admin 接口出现时再加，见 19.6）
    ▼
 ④ 业务规则 ────────────── app/services/xxx.py
    │                       · 业务判断、状态流转、调外部 API
@@ -590,7 +590,7 @@ HTTP 请求
 | **数据库访问在哪？** | 引擎在 `db.py`，session 在 `deps.py` 注入，**查询在 `services/`** | `app/db.py`<br>`app/deps.py`<br>`app/services/` | SQLAlchemy 引擎 + FastAPI `Depends` + `SET LOCAL` |
 | **参数校验在哪？** | 路由函数签名上的 Pydantic 模型，**框架自动执行** | `app/api/*.py`（模型定义在同文件） | Pydantic v2 + FastAPI 自动绑定 |
 | **错误处理在哪？** | 四个全局处理器集中在 `core/errors.py`，在 `main.py` 注册 | `app/core/errors.py` | `@app.exception_handler` |
-| **权限校验入口在哪？** | 三层，全部在 `deps.py`，通过路由的 `Depends()` 挂载 | `app/deps.py` | FastAPI `Depends` + PostgreSQL RLS |
+| **权限校验入口在哪？** | 两层已实现（认证 + RLS），第三层待 admin 接口；全部在 `deps.py`，通过路由的 `Depends()` 挂载 | `app/deps.py` | FastAPI `Depends` + PostgreSQL RLS |
 
 #### 三层权限的分工（再强调一次）
 
@@ -598,7 +598,7 @@ HTTP 请求
 |---|---|---|
 | ① 认证 | `get_current_user` | 401 `UNAUTHENTICATED` |
 | ② 数据隔离 | `get_session` 的 `SET LOCAL` + **数据库 RLS** | 查不到 → **404**（不是 403） |
-| ③ 功能权限 | `require_owner` | 403 `FORBIDDEN` |
+| ③ 功能权限 | 待实现（当前无 admin 路由，见 19.6） | 403 `FORBIDDEN` |
 
 ---
 
@@ -750,7 +750,7 @@ async def get_session(user: User = Depends(get_current_user)) -> AsyncGenerator[
 |---|---|---|---|
 | **① 认证** | `deps.get_current_user` | 有没有登录 | 401 |
 | **② 数据隔离** | `deps.get_session` 里的 `SET LOCAL` + 数据库 RLS | 能不能看别人的数据 | 查不到 → 404 |
-| **③ 功能权限** | `deps.require_owner` | 能不能用这个功能 | 403 |
+| **③ 功能权限** | 待实现（当前无 admin 路由，按 19.6 不预留） | 能不能用这个功能 | 403 |
 
 **用法**：
 
@@ -760,10 +760,9 @@ async def get_session(user: User = Depends(get_current_user)) -> AsyncGenerator[
 async def get_person(pid: int, session: Session = Depends(get_session)):
     ...
 
-# 管理员路由：要 owner
-@router.post("/users")
-async def create_user(..., _: User = Depends(require_owner)):
-    ...
+# 管理员路由：等第一个 admin 接口出现时，再实现 require_owner（见 19.6）
+# @router.post("/users")
+# async def create_user(..., _: User = Depends(require_owner)):
 ```
 
 ### 15.4 每个请求的执行顺序
@@ -960,6 +959,77 @@ async def create_user(..., _: User = Depends(require_owner)):
 - **没有为了"高级感"选任何东西**——全是主流方案
 - **没有为了"性能感"选任何东西**——FastAPI 的性能用不上，Postgres 不是因为它快
 - **有一处接近"安全感"，但站得住**：PostgreSQL。理由是 RLS，不是"企业级"
+
+### 19.6 最小必要封装原则（硬约束）
+
+> **一句话：能用框架的，绝不自己写；要自己写的，必须说清理由且当前就在用。**
+>
+> **后端架构要稳，不是要复杂。**
+
+#### 19.6.1 三条判定
+
+新增任何封装前，依次回答：
+
+| # | 问题 | 答不上来就别写 |
+|---|---|---|
+| 1 | **框架有现成机制吗？** | 有 → **必须用**，不许自己包一层 |
+| 2 | **这个封装解决什么问题？** | 说不清 → **不写** |
+| 3 | **当前代码有调用者吗？** | 只有"以后可能用" → **不写，等用到再加** |
+
+**三条全过，才允许写。**
+
+#### 19.6.2 七类能力必须优先复用框架
+
+| 能力 | 必须用的框架机制 | 禁止 |
+|---|---|---|
+| **HTTP 状态码** | 标准码：`200/201/204/400/401/403/404/409/413/429/500/502/504` | 自造状态码、用 200 包错误 |
+| **参数校验** | Pydantic `Field` / `Query` / `Path` 约束 | 手写 `if not x: raise` |
+| **错误处理** | `@app.exception_handler` 全局注册 | 路由内 `try/except` |
+| **路由分组** | `APIRouter` + `include_router` | 手动维护路由表 |
+| **中间件** | `@app.middleware("http")` / `CORSMiddleware` | 手写 header 处理 |
+| **日志** | 标准 `logging` + `extra={}` | `print()` |
+| **依赖注入** | `Depends` | 全局变量 / 自定义装饰器 |
+
+#### 19.6.3 自定义封装的四条准入门槛
+
+同时满足才允许新增：
+
+- [ ] 框架**没有**等价机制（或等价机制明显不够用）
+- [ ] 能**一句话说清**它解决什么问题
+- [ ] **当前代码有调用者**（不是"以后会用"）
+- [ ] 已写进本文对应章节
+
+**缺一条就不加。**
+
+#### 19.6.4 "骨架机制"与"功能封装"的区别
+
+这是唯一的例外条款，必须写清楚，否则会走两个极端：要么什么都预留，要么把地基也删了。
+
+| | **骨架机制** | **功能封装** |
+|---|---|---|
+| 定义 | **每个业务路由都必须经过** | 某个功能专用 |
+| 例子 | 认证入口、RLS 会话开关 | 分页、角色校验、raw session |
+| 零调用时 | **保留**——删了架构不成立 | **删除**——等有调用者再加 |
+| 当前保留 | `get_current_user`、`get_session` | 全部删除 |
+
+#### 19.6.5 已经因此被删掉的（记录在案）
+
+| 封装 | 删因 | 何时再加 |
+|---|---|---|
+| `get_raw_session` | 零调用；注释说给健康检查用，实际 health 走 `engine.connect()` | W2 写登录时 |
+| `get_pagination` + `Pagination` | 零调用 | 第一个列表接口 |
+| `paginated()` | 零调用 | 第一个列表接口 |
+| `require_owner` | 零调用（还没有 admin 路由） | 第一个 admin 接口 |
+
+**加回来都是 5-10 行的事**，但那一刻它会有真实调用者，能被验证。
+
+#### 19.6.6 反例（这三种都算违规）
+
+| 反例 | 为什么违规 |
+|---|---|
+| "以后肯定要用，先写上" | 违反第 3 条：没有当前调用者 |
+| "封装一下更优雅" | 违反第 2 条：说不出具体解决什么问题 |
+| "框架那个写法和我们习惯不一样" | 违反第 1 条：框架有机制就必须用 |
 
 ---
 
