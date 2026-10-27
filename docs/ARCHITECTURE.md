@@ -726,23 +726,41 @@ engine = create_async_engine(
 ### 15.2 会话注入（RLS 的唯一入口）
 
 ```python
-# deps.py
+# deps.py —— 只登记"这次请求属于谁"
 async def get_session(user: User = Depends(get_current_user)) -> AsyncGenerator[Session, None]:
     async with SessionLocal() as session:
-        # 这一行是 RLS 的开关，不能省
-        await session.execute(text("SET LOCAL app.user_id = :uid"), {"uid": user.id})
+        session.info["rls_user_id"] = user.id   # RLS 的开关，不能省
         yield session
+
+
+# db.py —— 每次事务开始前把变量下发下去
+@event.listens_for(Session, "after_begin")
+def _inject_rls_user_id(session, transaction, connection) -> None:
+    user_id = session.info.get("rls_user_id")
+    if user_id is None:
+        return
+    connection.exec_driver_sql("SELECT set_config('app.user_id', %s, true)", (str(user_id),))
 ```
+
+**为什么不是一个 `SET LOCAL`**：Postgres 的 `SET` 语句**不接受绑定参数**，
+`text("SET LOCAL app.user_id = :uid")` 会报 `syntax error at or near "$1"`
+（W2 实跑才暴露，W1 没有业务路由所以从没执行过这行）。
+参数化的等价写法是 `set_config(key, value, is_local=true)`。
+
+**为什么挂在 `after_begin` 上**：`is_local=true` 的变量活不过事务。service 里
+`commit()` 之后事务结束，变量随之失效，同一 session 再查库会拿到空串并报
+`invalid input syntax for type bigint: ""`。挂在事件上，**每个新事务自动补一次**，
+写代码的人不用记"提交后不能再查库"这种隐性规矩。
 
 **三条铁律**：
 
 | # | 规则 | 后果 |
 |---|---|---|
-| 1 | **必须在 session 开始后立刻 `SET LOCAL`** | 忘了 → RLS 拿不到变量 → 查询报错 |
-| 2 | **用 `SET LOCAL`，不是 `SET`** | `SET` 是会话级，连接归还池子后**下一个人还在用你的 user_id** |
+| 1 | **每个业务 session 必须登记 `rls_user_id`** | 忘了 → RLS 拿不到变量 → 查询报错 |
+| 2 | **必须用 `is_local=true`（事务级），不能用会话级** | 会话级变量在连接归还池子后还在，**下一个人会用你的 user_id** |
 | 3 | **应用连库用普通角色 `keeper_app`** | 用 `postgres` 超级用户 → RLS 被绕过，且不报任何错 |
 
-> 第 2 条是最隐蔽的坑。`SET LOCAL` 只在当前事务内有效，事务结束自动失效。
+> 第 2 条是最隐蔽的坑。事务级变量随事务消亡，会话级变量随连接消亡。
 
 ### 15.3 权限校验的三个入口
 

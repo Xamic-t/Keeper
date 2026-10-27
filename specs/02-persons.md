@@ -106,13 +106,13 @@ DELETE /api/persons/19
 
 ---
 
-#### `list_persons(session, pagination, keyword: str | None) -> tuple[list[Person], int]`
+#### `list_persons(session, *, offset: int, limit: int, keyword: str | None = None) -> tuple[list[PersonSummary], int]`
 
 1) **WHAT** —— 按关键词分页查人，返回当页数据和总数。
 2) **WHO** —— `api/persons.list_persons`。
 3) **INPUT** ——
    - `session`：带 RLS 的会话
-   - `pagination`：`Pagination(page, size)`，size 已限 1-100
+   - `offset` / `limit`：由 `deps.Pagination` 算好后传进来（size 已限 1-100）
    - `keyword`：可选，1-50 字符，模糊匹配 `nickname` 和 `aliases`
 4) **OUTPUT** —— `(当页 Person 列表, 总数)`。**列表可能为空，总数可能是 0**。
 5) **HAPPY** ——
@@ -152,58 +152,62 @@ DELETE /api/persons/19
 
 ---
 
-#### `create_person(session, user_id: int, payload: PersonCreate) -> Person`
+#### `create_person(session, user_id: int, *, nickname: str, roles: list[str], aliases=None, platform_ids=None, note=None) -> PersonSummary`
 
 1) **WHAT** —— 建一个人，同时建他对应的关系记录。
 2) **WHO** —— `api/persons.create_person`。
 3) **INPUT** ——
    - `user_id`：当前用户（写操作必须显式传）
-   - `payload`：`{nickname, roles, aliases?, platform_ids?, note?}`
-4) **OUTPUT** —— 新建的 `Person`（含 id）。
+   - 其余字段就是 `PersonCreate` 拆开的入参（见第 5 节末"W2 实现说明"）
+4) **OUTPUT** —— `PersonSummary`（person + relationship，tags 为空列表）。
 5) **HAPPY** ——
-   - `async with session.begin():`
-     - `person = Person(user_id=user_id, nickname=payload.nickname, ...)` → insert
-     - `await session.flush()` 拿到 person.id
-     - `rel = Relationship(user_id=user_id, person_id=person.id, roles=payload.roles)` → insert
-   - 事务提交后返回 person
+   - `session.add(Person(...))`
+   - `await session.flush()` 拿到 person.id
+   - `session.add(Relationship(person_id=person.id, roles=roles))`
+   - `await session.commit()`
+   - 返回 `PersonSummary`
 6) **EDGE** ——
    - **两个 insert 必须在同一事务**，第二个失败要回滚第一个
+   - 为什么不是 `async with session.begin():` —— 见第 5 节末"W2 实现说明"：session 在
+     `get_session` 里已经因为要下发 RLS 变量而开启了事务，再 `begin()` 会直接报错
    - `roles` 为空数组 → 默认 `["ge_jie"]`（Pydantic 层给默认值）
    - `nickname` 重复 → **允许**（可能有两个"王姐"），不加唯一约束
    - `user_id` 非法（外键不存在）→ 抛 500，不该发生（来自登录态）
 
 ---
 
-#### `update_person(session, person_id: int, payload: PersonUpdate) -> Person`
+#### `update_person(session, person_id: int, changes: dict[str, Any]) -> PersonSummary`
 
 1) **WHAT** —— 改人的身份信息（昵称、别名、联系方式、备注）。
 2) **WHO** —— `api/persons.update_person`。
-3) **INPUT** —— `person_id`；`payload` 只含要改的字段（`PATCH` 语义）。
-4) **OUTPUT** —— 更新后的 `Person`。
+3) **INPUT** —— `person_id`；`changes` 是 `PersonUpdate.model_dump(exclude_unset=True)`（PATCH 语义）。
+4) **OUTPUT** —— 更新后的 `PersonSummary`。
 5) **HAPPY** ——
    - 查 person → 不存在 404
-   - `payload.model_dump(exclude_unset=True)` 取出真正传了的字段
-   - 逐字段 setattr
-   - commit
-   - 返回
+   - 按白名单过滤 `changes`（`nickname/aliases/platform_ids/contact/note`）
+   - `update(...).returning(Person)` 一条语句改完并拿回新行
+   - 提交前把 tags / relationship 查好（提交后 RLS 变量已失效）
+   - commit → 返回
 6) **EDGE** ——
-   - 空 payload → 直接返回原对象（不报错）
-   - **不能改 `user_id`**（不在 Update 模型里）
-   - `updated_at` 由 `onupdate` 自动处理，不手写
+   - 空 changes → 直接返回原对象（不报错）
+   - **不能改 `user_id`**（白名单里没有）
+   - `note` 传 null 表示清空；其他字段传 null 视为没传（列本身 NOT NULL）
+   - `updated_at` 仍是库里的 `onupdate` 生成，只是用 `RETURNING` 拿回来，不手写时间
 
 ---
 
-#### `update_relationship(session, person_id: int, payload: RelationshipUpdate) -> Relationship`
+#### `update_relationship(session, person_id: int, changes: dict[str, Any]) -> Relationship`
 
 1) **WHAT** —— 改关系状态（阶段、预算、生日、禁忌、角色）。
 2) **WHO** —— `api/persons.update_relationship`。
-3) **INPUT** —— `person_id`；`payload` 只含要改的字段。
+3) **INPUT** —— `person_id`；`changes` 是 `RelationshipUpdate.model_dump(exclude_unset=True)`。
 4) **OUTPUT** —— 更新后的 `Relationship`。
 5) **HAPPY** ——
-   - 查 relationship → 不存在 404
-   - 逐字段 setattr
+   - 先确认 person 存在 → 不存在 404（否则"查不到人"会被误报成 500）
+   - 查 relationship → 不存在抛 500（数据不一致）
+   - 按白名单过滤
    - **若 `stage` 被显式传入** → 同时设 `stage_source='manual'`、`stage_updated_at=now`
-   - commit
+   - `update(...).returning(Relationship)` → commit
 6) **EDGE** ——
    - 只改 `gift_budget_min` 不传 max → 允许，但 CHECK 会拦 `min > max`
    - `birthday_type='lunar'` 但没传 `birthday_lunar` → Pydantic 层校验拦
@@ -219,7 +223,7 @@ DELETE /api/persons/19
 4) **OUTPUT** —— 无。
 5) **HAPPY** ——
    - 查 `raw_inputs` 里该人的 `file_path` 列表（**先查再删，删完就查不到了**）
-   - `async with session.begin(): DELETE FROM persons WHERE id=?`
+   - 事务：`DELETE FROM persons WHERE id=?`（`persons` / 关系等靠数据库外键级联）
    - 数据库级联自动删：relationships / facts / tags / ledger / events / reminders / raw_inputs / chat_segments / extraction_logs
    - `todos.person_id` 被置 NULL（任务保留）
    - 事务提交后，遍历 file_path 删文件
@@ -270,8 +274,32 @@ PersonDetail      person + relationship + tags + counts
 
 ---
 
+## 7. W2 实现说明（写代码时定下的三件事）
+
+写这份 spec 时没想清楚、写代码时才撞上的，记在这里，免得下次又绕一遍。
+
+**① service 不收 Pydantic 请求模型。**
+`PersonCreate` / `PersonUpdate` 定义在 `api/persons.py`（接口契约跟路由走，ARCHITECTURE 11.3.1）。
+service 若 import 它们，就变成 `services/ → api/` 的反向依赖，还会循环 import。
+所以：建人拆成关键字参数；改人传 `dict`（就是 `model_dump(exclude_unset=True)` 的结果），
+service 内部按白名单过滤。**`Pagination` 同理**——它定义在 `deps.py`（import 了 fastapi），
+service 只收算好的 `offset` / `limit`。
+
+**② 事务由 session 自己带着走，service 只写 `commit()`。**
+`get_session` 为了让 RLS 变量有事务可依附，session 一进路由就已经在事务里了。
+service 再写 `session.begin()` 会抛 `A transaction is already begun`。
+所以 `create_person` 的两个 insert 天然同事务，只是最后 `commit()` 一次。
+
+**③ 提交之后不要再用同一个 session 查库——现在也不会出错了。**
+`set_config(..., is_local=true)` 随事务消亡。W2 的做法是在 `db.py` 挂 `after_begin` 事件
+（见 ARCHITECTURE 15.2）：每个新事务开头自动补一次变量，所以提交后再查也不会拿到空变量。
+即便如此，**返回给前端的数据尽量在提交前备齐**，少一次往返。
+
+---
+
 ## 变更记录
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-10-28 | v1.0 | 首版：6 个 service 函数 + 6 个路由 + 请求响应模型清单 |
+| 2026-10-28 | v1.1 | W2 实现后回填：签名去掉 Pydantic 入参（改 offset/limit 与 dict）、事务写法、关系更新先校验人存在；新增第 7 节 |

@@ -113,11 +113,11 @@
 
 ---
 
-#### `create_session_token(user_id: int, max_age: int) -> str`
+#### `create_session_token(user_id: int, max_age: int | None = None) -> str`
 
 1) **WHAT** —— 用 `itsdangerous` 签发一个带过期时间的会话串。
-2) **WHO** —— `services/auth.authenticate` 成功后。
-3) **INPUT** —— `user_id` 正整数；`max_age` 有效期秒数（默认从 `settings.session_max_age` 取，7 天）。
+2) **WHO** —— `services/auth.authenticate` 成功后（实际由 `api/auth.login` 调用）。
+3) **INPUT** —— `user_id` 正整数；`max_age` 有效期秒数，`None` 表示用 `settings.session_max_age`（7 天）。
 4) **OUTPUT** —— URL-safe 的签名字符串。**永不为空**。
 5) **HAPPY** ——
    - 组装 payload：`{"uid": user_id, "exp": now + max_age}`
@@ -231,13 +231,14 @@
 
 ---
 
-#### `change_password(session, user: User, old_password: str, new_password: str) -> None`
+#### `change_password(session, user_id: int, old_password: str, new_password: str) -> None`
 
 1) **WHAT** —— 验旧密码后更新为新密码。
 2) **WHO** —— `api/auth.change_password`。
-3) **INPUT** —— `user` 当前用户；两个密码串。
+3) **INPUT** —— `user_id` 当前用户 id；两个密码串。
 4) **OUTPUT** —— 无。
 5) **HAPPY** ——
+   - 回表取 `User`（查不到 → 401 UNAUTHENTICATED）
    - `verify_password(old_password, user.password_hash)` 失败 → 抛 `AppError(BAD_CREDENTIALS, 400)`
    - `hash_password(new_password)` → 写入
    - commit
@@ -245,6 +246,8 @@
    - 新旧密码相同 → 允许（不做历史密码校验）
    - 新密码长度不合规 → Pydantic 已拦（8-128）
    - **改完要不要踢掉其他设备？** V1 不做（无会话表）
+   - 收 `user_id` 而不是 `User` / `CurrentUser`：`CurrentUser` 定义在 `deps.py`（import 了 fastapi），
+     service 不能反向依赖它，否则"能脱离 HTTP 单测"这条就断了
 
 ---
 
@@ -300,7 +303,8 @@
 1) **WHAT** —— 从 cookie 解析当前用户，是所有业务路由的认证入口。
 2) **WHO** —— `get_session`、`require_owner`、`api/auth.me`。
 3) **INPUT** —— `request`（读 cookie）。
-4) **OUTPUT** —— `CurrentUser(id, username, role)`。
+4) **OUTPUT** —— `CurrentUser(id, username, display_name, role)`。
+   （`display_name` 是 W2 加上的：`/api/auth/me` 要返回它，而快照本来就来自同一次查询，不多花一次库。）
 5) **HAPPY** ——
    - 读 `request.cookies["session"]`
    - `decode_session_token` → `user_id`
@@ -330,8 +334,28 @@
 
 ---
 
+## 7. W2 实现说明（写代码时定下的四件事）
+
+**① `get_raw_session` 按 19.6 加回来了。** 登录时还没有 user_id，`get_current_user` 又要查
+`users`（这张表没开 RLS），两者都不能走带 RLS 变量的 `get_session`，否则循环依赖。
+它现在有两个真实调用者：`api/auth.login` 和 `deps.get_current_user`。
+
+**② `CurrentUser` 多了 `display_name`。** `/api/auth/me` 要返回它，而 `get_current_user`
+本来就把整行 `User` 查出来了，多带一个字段不花额外查询。
+
+**③ CSRF 做成了依赖 `deps.require_csrf`，不是中间件。**
+理由：框架的 `Depends` 就能表达"只有写接口要校验"，中间件还得自己维护路径白名单。
+它读 `csrf` cookie 和 `X-CSRF-Token` 头，`GET` 路由不挂。
+
+**④ 登录限流（`RATE_LIMITED`）W2 没做。**
+按 19.6，框架没有现成机制，自己写要引入存储（内存计数在 reload 下会丢）。
+账户锁定已经挡住单账号爆破；IP 限流等 W3 上 Docker + Caddy 时一起做（Caddy 有 rate_limit 指令）。
+
+---
+
 ## 变更记录
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-10-28 | v1.0 | 首版：5 个安全原语 + 4 个 service + 3 个路由 + get_current_user 真实实现 |
+| 2026-10-28 | v1.1 | W2 实现后回填：`max_age` 可空、`change_password` 收 `user_id`、`CurrentUser` 加 `display_name`；补第 7 节 W2 实现说明 |

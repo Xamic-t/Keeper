@@ -2,14 +2,13 @@
 
 from fastapi import APIRouter
 
-from app.api import health
+from app.api import auth, health, persons
 
 api_router = APIRouter(prefix="/api")
 
 # 系统
 api_router.include_router(health.router)
 
-# 业务模块（按 07-后端设计 逐个加，现在都还没写）
-# from app.api import auth, persons, facts, ledger, events, todos, ingest
-# api_router.include_router(auth.router)
-# api_router.include_router(persons.router)
+# 业务模块（按 07-后端设计 逐个加）
+api_router.include_router(auth.router)
+api_router.include_router(persons.router)

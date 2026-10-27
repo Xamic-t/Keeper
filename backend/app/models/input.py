@@ -40,7 +40,12 @@ class RawInput(SQLModel, table=True):
     file_hash: str | None = Field(default=None, max_length=64)
     ocr_text: str | None = Field(default=None, sa_column=Column(Text))
     raw_text: str | None = Field(default=None, sa_column=Column(Text))
-    status: str = Field(default="pending", max_length=20, nullable=False)
+    status: str = Field(
+        default="pending",
+        max_length=20,
+        nullable=False,
+        sa_column_kwargs={"server_default": "pending"},
+    )
     error_msg: str | None = Field(default=None, max_length=500)
     file_deleted_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True))
@@ -69,5 +74,7 @@ class ChatSegment(SQLModel, table=True):
     speaker: str = Field(max_length=10, nullable=False)
     content: str = Field(sa_column=Column(Text, nullable=False))
     said_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
-    said_at_inferred: bool = Field(default=False, nullable=False)
+    said_at_inferred: bool = Field(
+        default=False, nullable=False, sa_column_kwargs={"server_default": text("false")}
+    )
     seq: int = Field(nullable=False)

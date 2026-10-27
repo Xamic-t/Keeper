@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     Text,
     func,
+    text,
 )
 from sqlmodel import Field, SQLModel
 
@@ -47,12 +48,20 @@ class Fact(SQLModel, table=True):
     content: str = Field(sa_column=Column(Text, nullable=False))
     category: str = Field(max_length=20, nullable=False)
     half_life_days: int | None = Field(default=None, sa_column=Column(Integer))
-    weight: float = Field(default=1.0, sa_column=Column(Float, nullable=False))
+    weight: float = Field(
+        default=1.0,
+        sa_column=Column(Float, nullable=False, server_default=text("1.0")),
+    )
     confidence: float = Field(sa_column=Column(Float, nullable=False))
     source_type: str = Field(max_length=20, nullable=False)
     source_id: int | None = Field(default=None, description="多态引用，无外键")
     evidence: str | None = Field(default=None, sa_column=Column(Text))
-    status: str = Field(default="pending", max_length=20, nullable=False)
+    status: str = Field(
+        default="pending",
+        max_length=20,
+        nullable=False,
+        sa_column_kwargs={"server_default": "pending"},
+    )
     last_confirmed_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True))
     )

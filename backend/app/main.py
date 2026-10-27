@@ -57,25 +57,16 @@ app.add_middleware(
 
 @app.middleware("http")
 async def access_log(request: Request, call_next: RequestResponseEndpoint) -> Response:
-    """每个请求记一行日志，并下发 trace_id。"""
+    """每个请求记一行日志，并下发 trace_id。
+
+    这里不捕获异常：未捕获异常由 core/errors.py 的全局 handler 统一记一次。
+    中间件再 try/except 一次会导致同一异常记两遍（W1 遗留 G7）。
+    """
     trace_id = uuid.uuid4().hex[:12]
     request.state.trace_id = trace_id
     started = time.perf_counter()
 
-    try:
-        response = await call_next(request)
-    except Exception:
-        duration = int((time.perf_counter() - started) * 1000)
-        logger.exception(
-            "request failed",
-            extra={
-                "trace_id": trace_id,
-                "method": request.method,
-                "path": request.url.path,
-                "duration_ms": duration,
-            },
-        )
-        raise
+    response = await call_next(request)
 
     duration = int((time.perf_counter() - started) * 1000)
     logger.info(
@@ -92,7 +83,7 @@ async def access_log(request: Request, call_next: RequestResponseEndpoint) -> Re
     return response
 
 
-# 四个全局异常处理器：AppError / 参数校验 / HTTPException / 兜底
+# 六个全局异常处理器：AppError / 参数校验 / HTTPException / 唯一约束 / 兜底
 register_exception_handlers(app)
 
 # 所有业务路由挂在 /api 下

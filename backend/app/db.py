@@ -5,13 +5,14 @@
 
 import logging
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.orm import Session
 
 from app.config import settings
 
@@ -30,6 +31,30 @@ SessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+
+@event.listens_for(Session, "after_begin")
+def _inject_rls_user_id(
+    session: Session,
+    transaction: object,  # noqa: ARG001 — 事件签名固定
+    connection: object,
+) -> None:
+    """每次事务开始时重放 RLS 变量。
+
+    为什么需要：`set_config(..., is_local=true)` 与事务同生共死。service 里
+    commit 之后事务结束，变量随之失效；同一 session 再查库会拿到空字符串，
+    Postgres 会报 `invalid input syntax for type bigint: ""`。
+
+    用 SQLAlchemy 官方事件（after_begin）在每次新事务开头补一次，
+    调用方只需要在 `session.info["rls_user_id"]` 里放上当前用户。
+    没放这个 key 的 session（系统级 session）不受影响。
+    """
+    user_id = session.info.get("rls_user_id")
+    if user_id is None:
+        return
+    connection.exec_driver_sql(  # type: ignore[attr-defined]
+        "SELECT set_config('app.user_id', %s, true)", (str(user_id),)
+    )
 
 
 async def check_database() -> dict[str, str]:

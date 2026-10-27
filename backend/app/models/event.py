@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     Index,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
@@ -44,7 +45,9 @@ class Event(SQLModel, table=True):
     lunar: dict[str, Any] | None = Field(default=None, sa_column=Column(JSONB))
     source_type: str | None = Field(default=None, max_length=20)
     source_id: int | None = Field(default=None)
-    is_done: bool = Field(default=False, nullable=False)
+    is_done: bool = Field(
+        default=False, nullable=False, sa_column_kwargs={"server_default": text("false")}
+    )
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     )

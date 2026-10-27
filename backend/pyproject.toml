@@ -55,5 +55,9 @@ ignore = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# 整个测试会话共用一个事件循环：app.db 的异步引擎是模块级单例，
+# 连接对象有 loop 亲和性，跨 loop 复用会炸（psycopg 会报 attached to a different loop）
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
 pythonpath = ["."]

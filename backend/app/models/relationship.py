@@ -73,15 +73,26 @@ class Relationship(SQLModel, table=True):
         default_factory=lambda: ["ge_jie"],
         sa_column=Column(JSONB, nullable=False, server_default=text("'[\"ge_jie\"]'::jsonb")),
     )
-    stage: str = Field(default="new", max_length=20, nullable=False)
-    stage_source: str = Field(default="auto", max_length=10, nullable=False)
+    stage: str = Field(
+        default="new", max_length=20, nullable=False, sa_column_kwargs={"server_default": "new"}
+    )
+    stage_source: str = Field(
+        default="auto", max_length=10, nullable=False, sa_column_kwargs={"server_default": "auto"}
+    )
     stage_updated_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True))
     )
 
     # 价值
-    value_tier: str = Field(default="unknown", max_length=20, nullable=False)
-    value_tier_source: str = Field(default="auto", max_length=10, nullable=False)
+    value_tier: str = Field(
+        default="unknown",
+        max_length=20,
+        nullable=False,
+        sa_column_kwargs={"server_default": "unknown"},
+    )
+    value_tier_source: str = Field(
+        default="auto", max_length=10, nullable=False, sa_column_kwargs={"server_default": "auto"}
+    )
     total_in: Decimal = Field(
         default=Decimal("0"),
         sa_column=Column(Numeric(12, 2), nullable=False, server_default="0"),
@@ -113,7 +124,9 @@ class Relationship(SQLModel, table=True):
     last_interaction_at: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True))
     )
-    is_active: bool = Field(default=True, nullable=False)
+    is_active: bool = Field(
+        default=True, nullable=False, sa_column_kwargs={"server_default": text("true")}
+    )
 
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
