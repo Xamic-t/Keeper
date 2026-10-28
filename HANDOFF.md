@@ -1,7 +1,7 @@
 # HANDOFF · 开发交接说明
 
 > **这份文档给接手开发的 Agent 看。** 读完它，你应该知道：做什么、读什么、按什么顺序做、怎么算做完。
-> 最后更新：2026-10-29 · 当前进度 **W11（修 P0 + 补测试）、W12（补 P1 交互闭环）已完成，主线「提醒推送」跑通；剩 P2/P3 清债 + W13 真实验收**
+> 最后更新：2026-10-29 · 当前进度 **W11（修 P0 + 补测试）、W12（补 P1 交互闭环）已完成，主线「提醒推送」跑通；下一步 = 接 DeepSeek Harness（已立项，见 `docs/16`）+ W13 真实验收；剩 P2/P3 清债**
 
 ---
 
@@ -152,7 +152,8 @@ cd backend && uv run python -m app.jobs.daily
 | **W11 · 修 P0** | ✅ **完成** | ① `jobs/daily.py` 按用户逐个开 session<br>② `reminder.py` 节日 T-2→T-3，同步 `today.py`<br>③ `frontend/Dockerfile` 换 `caddy:2-alpine`<br>④ `api/admin.py` 两个接口补 `require_csrf`<br>⑤ 已在 `docs/15` 勾掉 | `uv run python -m app.jobs.daily` 不再抛异常；`docker compose build web` 成功 |
 | **W11 · 补测试** | ✅ **完成** | 新增 `test_daily_job.py` / `test_festival.py` / `test_extract_parse.py` | 105 个测试全绿 |
 | **W12 · 补 P1** | ✅ **完成** | ① 后端 `POST /api/raw-inputs/{id}/assign` + `forced_person_id`<br>② `ConfirmView.vue` 按 `kind` 分叉 + catch<br>③ `TodayView.vue` 加"转待办"<br>④ `event.py` 农历去重<br>⑤ `ingest.py` 边读边截断 | 见 `docs/W12-完成报告.md`，单测锁住强制归属 |
-| **W13 · 真实验收** | ⬜ **等你填 Key** | 按 `docs/待填写清单.md`：填 Key → 30 张截图 → 统计准确率 → 切模型 | 事实准确率 ≥75%，金额/日期 ≥95% |
+| **W13 · 接 Harness** | ⬜ **已立项** | 按 `docs/16-Harness接入方案.md` 四阶段：A 跑起来 → B 写工具插件 → C 接主服务侧车 → D 灰度。**前置：你填 `DEEPSEEK_API_KEY`** | 你问"我今天该联系谁"，它调接口、查了再回；且 dsh 挂了主流程不受影响 |
+| **W13 · 真实验收** | ⬜ **等你填 Key** | 按 `docs/待填写清单.md`：填 Key → 30 张截图 → 统计准确率 → 切模型（与接 Harness 并行，共用同一个 key） | 事实准确率 ≥75%，金额/日期 ≥95% |
 | **W14+ · 按反馈改** | 打磨 | 改 3 个 prompt（`prompts/v1_*.md`，版本升 v2）<br>改 `DAILY_TEMPLATE`、`LEVELS`、配色 | 用户说"这个我天天用" |
 
 **每个阶段结束必须 commit + push（带代理），并在 `docs/W{N}-完成报告.md` 写一份简报。**
@@ -367,3 +368,4 @@ git -c http.proxy=http://127.0.0.1:7897 \
 | 2026-10-28 | v1.2 | W3–W10 全部完成：45 个接口 + 8 个前端页面 + 部署脚本；必读清单改为「待填写清单」；遗留项换成待你处理的三条 |
 | 2026-10-28 | **v1.3** | **全量代码评审后重写**：新增第零节「当前真实状态」；排期改成「已完成 / 下一步 W11-14 / 最终目标」；新增 W11 验收命令与第十二节 28 个缺陷清单；必读清单第 0 位改成评审报告 |
 | 2026-10-29 | **v1.4** | **W11+W12 完成**：P0 三条 + P1 五条全修（见 `W11/W12-完成报告.md`）；每日任务、节日提醒、生产 web 容器实测跑通；测试 88 → 105；下一步是 W13 真实验收（等你填 Key + 30 张截图）与 P2/P3 清债 |
+| 2026-10-29 | **v1.5** | **决定直接接 DeepSeek Harness**：新增 `docs/16-Harness接入方案.md`（clone 官方仓库调研的真实形态 + 4 阶段路线图）；`ARCHITECTURE` 19.7 从"V1 不接 V2 接"改为"直接接、作为侧车"；排期新增 W13·接 Harness（与真实验收并行，共用同一 key） |

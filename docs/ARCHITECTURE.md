@@ -1064,9 +1064,10 @@ async def get_person(pid: int, session: Session = Depends(get_session)):
 | "封装一下更优雅" | 违反第 2 条：说不出具体解决什么问题 |
 | "框架那个写法和我们习惯不一样" | 违反第 1 条：框架有机制就必须用 |
 
-### 19.7 DeepSeek Harness 接入方案（V2）
+### 19.7 DeepSeek Harness 接入方案
 
-> **决定：V1 不接，V2 接。** 本节说明为什么不影响主架构、以及接的时候必须守住什么。
+> **决定（2026-10-29 更新）：直接接，作为侧车。** 原定"V1 不接、V2 接"，用户在 10-29 拍板提前接。
+> 本节说明怎么接、以及接的时候必须守住什么。真实仓库调研与分阶段路线图见 [`16-Harness接入方案.md`](./16-Harness接入方案.md)。
 
 #### 19.7.1 它是什么
 
@@ -1077,21 +1078,23 @@ async def get_person(pid: int, session: Session = Depends(get_session)):
 | 核心架构 | 基于 Cordis 插件系统，"一切皆插件"——**连 Agent 主循环本身都是插件** |
 | 定位 | 对标 OpenAI Codex / Anthropic Claude Code，**通用 agent 运行时** |
 | 能力 | 工具调用、子 Agent 编排、会话持久化、记忆、沙箱、文件系统 |
-| 技术栈 | **Node.js**，支持 40+ 模型提供方 |
+| 技术栈 | **Node.js**（monorepo），支持 40+ 模型提供方；另带 **Python SDK**（`deepseek-harness-sdk`，stdio JSON-RPC 驱动运行时） |
 | 核心价值 | **让模型自主决定"下一步调什么工具"** |
+| 运行 | `npx @deepseek-ai/dsh web`（Web UI，默认 `127.0.0.1:3080`），或源码 `pnpm dsh web` |
 
-#### 19.7.2 为什么 V1 不接
+> ⚠️ **developer preview**：官方明确"未来将出现破坏兼容性的变更"。所以只能当**侧车**接（见 19.7.3），不能侵入主服务；升级坏了随时可拆。
 
-**不是因为不需要，是因为顺序。**
+#### 19.7.2 为什么直接接、但必须是侧车
+
+**直接接，不代表放进主流程。** 三条理由：
 
 | 理由 | 说明 |
 |---|---|
-| **助理没有数据可聊** | 助理要回答"谁喜欢喝茶"，得先有 20 个人、几百条事实。V1 前 8 周都在攒这些 |
-| **V1 的 AI 是单轮的** | 看图→JSON、上下文→文案，输入输出固定，`asyncio` 串 30 行就够 |
-| **V1 有更紧的事** | 投喂链路和提醒是这个产品的命，助理是锦上添花 |
-| **先跑通再变复杂** | 一个能用的 V1 比一个接满框架的半成品有价值 |
+| **助理的命根子是数据** | 助理要回答"谁喜欢喝茶"，得靠 V1 攒下的 20 个人、几百条事实。数据没攒厚之前，它一问三不知，价值体现不出来 |
+| **preview 会破坏性变更** | dsh 正在快速迭代，升级可能坏。接成侧车，它坏了投喂/提醒照跑 |
+| **两套技术栈** | dsh 是 Node，主服务是 Python。侧车 + HTTP 是唯一不互相拖累的接法 |
 
-**V1 结束时，助理的"插座"已经天然存在**——所有数据都能通过现有只读 API 拿到，不需要为它提前建任何东西。
+**侧车的好处**：主流程不知道 dsh 存在；dsh 挂了、被删了、升级坏了，投喂/抽取/提醒/待办一根汗毛都不受影响。助理的"插座"已经天然存在——所有数据都能通过现有只读 API 拿到，不需要为它改主流程。
 
 #### 19.7.3 怎么接：侧车，不是地基
 
@@ -1189,21 +1192,20 @@ Python 从 Postgres 读
 | 备份要备两套 | 低 | Postgres 照旧；Harness 的会话存储单独挂卷 |
 | 冷启动变慢 | 低 | Harness 容器独立，不阻塞主服务启动 |
 
-#### 19.7.8 V2 接入的落地步骤
+#### 19.7.8 接入的落地步骤（2026-10-29 按真实仓库更新）
 
 ```
-1. 主服务加一个 X-Service-Token 校验的依赖（只给 /api/assistant/* 用）
-2. 抽出 5 个只读接口：
-   · GET /api/assistant/persons          人列表（含标签）
-   · GET /api/assistant/persons/{id}     档案摘要
-   · GET /api/assistant/persons/{id}/facts
-   · GET /api/assistant/ledger/summary   往来汇总
-   · GET /api/assistant/today            今天该做什么
-3. docker-compose 加 harness 服务，挂独立卷
-4. 在 Harness 里注册这 5 个接口为工具
-5. 前端加一个"助理"入口（第四屏或浮动按钮）
-6. 灰度：先只给自己用一周，再放开
+第 1 步 · 跑起来：npx @deepseek-ai/dsh web，配 DEEPSEEK_API_KEY 环境变量
+第 2 步 · 写工具插件：一个 dsh 插件里 ctx.tools.register(defineTool({...}))
+            execute 里 fetch 调主服务的只读接口（如 GET /api/today）
+第 3 步 · 接主服务：抽出 5 个只读接口（persons / persons/{id} / facts / ledger 汇总 / today）
+            docker-compose 加 harness 侧车容器，工具里用容器主机名 app:8000
+第 4 步 · 装进 profile：dsh plugin add 把工具插件装成组合包，配进 profile
+第 5 步 · 前端加"助理"入口（第四屏或浮动按钮）
+第 6 步 · 灰度：先只给自己用一周，再放开
 ```
+
+> 详细步骤、插件/工具/LLM 适配器的真实写法、给 key 到底发生什么，见 [`16-Harness接入方案.md`](./16-Harness接入方案.md)。
 
 **第 1 步之前，V1 一行代码都不用改。**
 
