@@ -44,8 +44,9 @@ class Settings(BaseSettings):
     login_rate_limit: int = 10
 
     # ---- 存储 ----
-    # 上传原图落盘根目录（相对项目根）。容器里挂到 /app/data
-    data_dir: str = "data"
+    # 上传原图落盘根目录。默认是项目根的 data/（与 cwd 无关，
+    # 不然从 backend/ 启动就会落到 backend/data，跟文档说的路径对不上）
+    data_dir: str = str(Path(__file__).resolve().parents[2] / "data")
     max_upload_mb: int = 8
     max_upload_count: int = 10
 

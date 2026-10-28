@@ -12,6 +12,8 @@ venv/
 node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/*.tsbuildinfo
+frontend/_tmp_*
 *.local
 
 # ---- 环境变量与密钥（绝不能提交）----

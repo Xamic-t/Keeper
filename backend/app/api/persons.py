@@ -149,12 +149,24 @@ class PersonCounts(BaseModel):
     todos: int
 
 
+class TimelineItem(BaseModel):
+    """时间线上的一格。"""
+
+    day: date
+    kind: str  # fact | ledger | event
+    title: str
+    detail: str | None = None
+    amount: str | None = None
+    direction: str | None = None
+
+
 class PersonDetail(PersonOut):
-    """档案详情。tags 是标签值列表，summary 留给 W7 画像生成。"""
+    """档案详情。tags 是标签值列表，summary 是人物综述（W7 生成）。"""
 
     tags: list[str]
     counts: PersonCounts
     summary: str | None = None
+    summary_stale: bool = False
 
 
 # ---------- 转换（model → 响应模型） ----------
@@ -214,6 +226,8 @@ def _detail(data: PersonDetailData) -> PersonDetail:
         **base.model_dump(),
         tags=data.tags,
         counts=PersonCounts(**data.counts),
+        summary=data.person.summary,
+        summary_stale=bool(data.person.summary_stale),
     )
 
 
@@ -326,3 +340,30 @@ async def delete_person(
     """真删：级联 10 张表 + 删文件，待办保留但失去归属。204 无 body。"""
     await person_service.delete_person(session, person_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    "/{person_id}/timeline",
+    response_model=DataResponse[list[TimelineItem]],
+    summary="时间线",
+)
+async def get_timeline(
+    person_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: int = 50,
+) -> dict[str, Any]:
+    """事实、往来、事件混排的时间线，新的在前。"""
+    return ok(await person_service.build_timeline(session, person_id, limit=limit))
+
+
+@router.get(
+    "/{person_id}/export",
+    response_model=DataResponse[dict],
+    summary="单人导出",
+)
+async def export_person(
+    person_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """把这个人的全部数据导成 JSON（自己看 / 迁移用）。"""
+    return ok(await person_service.export_person(session, person_id))

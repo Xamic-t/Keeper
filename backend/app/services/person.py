@@ -300,3 +300,179 @@ async def delete_person(session: AsyncSession, person_id: int) -> None:
             logger.warning(
                 "delete file failed person_id=%s error=%s", person_id, type(exc).__name__
             )
+
+
+async def build_timeline(
+    session: AsyncSession, person_id: int, *, limit: int = 50
+) -> list[dict[str, Any]]:
+    """事实、往来、事件混排的时间线，新的在前。"""
+    if await session.get(Person, person_id) is None:
+        raise AppError(ErrorCode.NOT_FOUND, "找不到这个人", status_code=404)
+
+    items: list[dict[str, Any]] = []
+
+    facts = (
+        (
+            await session.execute(
+                select(Fact)
+                .where(Fact.person_id == person_id, Fact.status == "confirmed")
+                .order_by(Fact.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    items.extend(
+        {
+            "day": fact.created_at.date(),
+            "kind": "fact",
+            "title": fact.content,
+            "detail": fact.evidence,
+            "amount": None,
+            "direction": None,
+        }
+        for fact in facts
+    )
+
+    ledgers = (
+        (
+            await session.execute(
+                select(Ledger)
+                .where(Ledger.person_id == person_id)
+                .order_by(Ledger.occurred_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    items.extend(
+        {
+            "day": ledger.occurred_at,
+            "kind": "ledger",
+            "title": f"{'收到' if ledger.direction == 'in' else '付出'} {ledger.amount} 元",
+            "detail": ledger.note,
+            "amount": str(ledger.amount),
+            "direction": ledger.direction,
+        }
+        for ledger in ledgers
+    )
+
+    events = (
+        (
+            await session.execute(
+                select(Event).where(Event.person_id == person_id).order_by(Event.occurs_on.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    items.extend(
+        {
+            "day": event.occurs_on,
+            "kind": "event",
+            "title": event.title,
+            "detail": event.type,
+            "amount": None,
+            "direction": None,
+        }
+        for event in events
+    )
+
+    items.sort(key=lambda entry: entry["day"], reverse=True)
+    return items[:limit]
+
+
+async def export_person(session: AsyncSession, person_id: int) -> dict[str, Any]:
+    """把一个人的全部数据导成 JSON（自己看 / 迁移用）。"""
+    detail = await get_person_detail(session, person_id)
+
+    facts = (
+        (
+            await session.execute(
+                select(Fact)
+                .where(Fact.person_id == person_id, Fact.status == "confirmed")
+                .order_by(Fact.weight.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    tags = (await session.execute(select(Tag).where(Tag.person_id == person_id))).scalars().all()
+    ledgers = (
+        (
+            await session.execute(
+                select(Ledger)
+                .where(Ledger.person_id == person_id)
+                .order_by(Ledger.occurred_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    events = (
+        (
+            await session.execute(
+                select(Event).where(Event.person_id == person_id).order_by(Event.occurs_on)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return {
+        "person": {
+            "id": detail.person.id,
+            "nickname": detail.person.nickname,
+            "aliases": detail.person.aliases,
+            "platform_ids": detail.person.platform_ids,
+            "contact": detail.person.contact,
+            "note": detail.person.note,
+            "summary": detail.person.summary,
+            "created_at": detail.person.created_at.isoformat(),
+        },
+        "relationship": {
+            "roles": detail.relationship.roles,
+            "stage": detail.relationship.stage,
+            "stage_source": detail.relationship.stage_source,
+            "birthday_solar": (
+                detail.relationship.birthday_solar.isoformat()
+                if detail.relationship.birthday_solar
+                else None
+            ),
+            "birthday_lunar": detail.relationship.birthday_lunar,
+            "taboo": detail.relationship.taboo,
+            "total_in": str(detail.relationship.total_in),
+            "total_out": str(detail.relationship.total_out),
+        },
+        "facts": [
+            {
+                "content": fact.content,
+                "category": fact.category,
+                "weight": fact.weight,
+                "confidence": fact.confidence,
+                "evidence": fact.evidence,
+                "created_at": fact.created_at.isoformat(),
+            }
+            for fact in facts
+        ],
+        "tags": [{"key": tag.key, "value": tag.value} for tag in tags],
+        "ledger": [
+            {
+                "direction": ledger.direction,
+                "kind": ledger.kind,
+                "amount": str(ledger.amount),
+                "occurred_at": ledger.occurred_at.isoformat(),
+                "note": ledger.note,
+            }
+            for ledger in ledgers
+        ],
+        "events": [
+            {
+                "type": event.type,
+                "title": event.title,
+                "occurs_on": event.occurs_on.isoformat(),
+                "rrule": event.rrule,
+            }
+            for event in events
+        ],
+    }

@@ -126,15 +126,8 @@ def build_prompt(candidates: list[dict[str, Any]], kind: str) -> str:
         ) from exc
 
     candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
-    extra = (
-        "候选列表为空——这是第一个联系人，person_id 请返回 null。"
-        if not candidates
-        else ""
-    )
-    return (
-        template.replace("{candidates}", candidates_json)
-        + f"\n\n材料类型：{kind}。{extra}\n"
-    )
+    extra = "候选列表为空——这是第一个联系人，person_id 请返回 null。" if not candidates else ""
+    return template.replace("{candidates}", candidates_json) + f"\n\n材料类型：{kind}。{extra}\n"
 
 
 def _as_float(value: Any, default: float = 0.0) -> float:
@@ -390,8 +383,11 @@ async def persist_candidates(
         session.add(person)
 
 
-async def extract_from_raw_input(raw_input_id: int) -> ExtractionResult:
+async def extract_from_raw_input(raw_input_id: int, user_id: int) -> ExtractionResult:
     """编排整个抽取流程。**自己开 session**，绝不复用请求的。
+
+    `user_id` 必须由调用方传进来：raw_inputs 是 RLS 表，**先设变量才能查**，
+    否则第一次查询就会因为拿不到 app.user_id 而报错。
 
     任何失败都写进 raw_inputs.status='failed'，不向上抛——后台任务没有请求上下文，
     抛出去只会变成一个没人看的堆栈。
@@ -400,13 +396,13 @@ async def extract_from_raw_input(raw_input_id: int) -> ExtractionResult:
     result = ExtractionResult()
 
     async with SessionLocal() as session:
+        # 第一件事就是登记 RLS 变量，否则下面任何查询都会炸
+        session.info["rls_user_id"] = user_id
+
         raw_input = await session.get(RawInput, raw_input_id)
         if raw_input is None:
             logger.warning("raw_input missing id=%s", raw_input_id)
             return result
-
-        user_id = raw_input.user_id
-        session.info["rls_user_id"] = user_id
 
         raw_input.status = "processing"
         session.add(raw_input)

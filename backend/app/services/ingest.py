@@ -138,6 +138,12 @@ async def ingest_text(
     return raw_input
 
 
+async def list_raw_inputs(session: AsyncSession, limit: int = 20) -> list[RawInput]:
+    """最近投喂的材料，新的在前。投喂页用它显示处理状态。"""
+    stmt = select(RawInput).order_by(RawInput.created_at.desc()).limit(limit)
+    return list((await session.execute(stmt)).scalars().all())
+
+
 async def get_raw_input(session: AsyncSession, raw_input_id: int) -> RawInput:
     """查处理状态。取不到（不存在或不是自己的）一律 404。"""
     raw_input = await session.get(RawInput, raw_input_id)
@@ -146,6 +152,9 @@ async def get_raw_input(session: AsyncSession, raw_input_id: int) -> RawInput:
     return raw_input
 
 
-async def run_extraction(raw_input_id: int) -> None:
-    """后台任务入口。异常在里面全部吃掉，这里只做转调。"""
-    await extract.extract_from_raw_input(raw_input_id)
+async def run_extraction(raw_input_id: int, user_id: int) -> None:
+    """后台任务入口。异常在里面全部吃掉，这里只做转调。
+
+    `user_id` 要跟着走：后台任务自己开 session，RLS 变量得有人告诉它是谁的活。
+    """
+    await extract.extract_from_raw_input(raw_input_id, user_id)

@@ -3,6 +3,7 @@
 上传立即返回 202，抽取在 BackgroundTasks 里跑（specs/03-ingest.md 第 2 节）。
 """
 
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -110,19 +111,21 @@ async def upload_images(
                 status_code=400,
                 detail={"filename": upload.filename},
             )
-        items.append(UploadItem(filename=upload.filename or "upload", content=content, suffix=suffix))
+        items.append(
+            UploadItem(filename=upload.filename or "upload", content=content, suffix=suffix)
+        )
 
     results = await ingest_service.ingest_images(session, user.id, items, person_id)
 
     queued = 0
     for item in results:
         if item.raw_input_id is not None and not item.duplicate and item.error is None:
-            background.add_task(ingest_service.run_extraction, item.raw_input_id)
+            background.add_task(ingest_service.run_extraction, item.raw_input_id, user.id)
             queued += 1
 
     return ok(
         IngestData(
-            items=[IngestItemOut(**item.__dict__) for item in results],
+            items=[IngestItemOut(**asdict(item)) for item in results],
             queued=queued,
         )
     )
@@ -142,10 +145,8 @@ async def upload_text(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """文本投喂同样排队抽取，立刻返回。"""
-    raw_input = await ingest_service.ingest_text(
-        session, user.id, payload.text, payload.person_id
-    )
-    background.add_task(ingest_service.run_extraction, raw_input.id)
+    raw_input = await ingest_service.ingest_text(session, user.id, payload.text, payload.person_id)
+    background.add_task(ingest_service.run_extraction, raw_input.id, user.id)
     return ok(
         IngestData(
             items=[
@@ -157,6 +158,29 @@ async def upload_text(
             ],
             queued=1,
         )
+    )
+
+
+@router.get("/raw-inputs", response_model=DataResponse[list[RawInputOut]], summary="最近投喂")
+async def list_raw_inputs(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    limit: int = 20,
+) -> dict[str, Any]:
+    """投喂页用它显示每条材料的处理状态。"""
+    rows = await ingest_service.list_raw_inputs(session, limit)
+    return ok(
+        [
+            RawInputOut(
+                id=row.id or 0,
+                kind=row.kind,
+                status=row.status,
+                person_id=row.person_id,
+                error_msg=row.error_msg,
+                created_at=row.created_at,
+                processed_at=row.processed_at,
+            )
+            for row in rows
+        ]
     )
 
 

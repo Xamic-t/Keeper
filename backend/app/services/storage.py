@@ -60,7 +60,5 @@ def delete_file(file_path: str | None, *, person_id: int | None = None) -> bool:
         return True
     except OSError as exc:
         # 隐私红线：日志里只出现 id，不出现路径（路径含 user_id 但更细）
-        logger.warning(
-            "delete file failed person_id=%s error=%s", person_id, type(exc).__name__
-        )
+        logger.warning("delete file failed person_id=%s error=%s", person_id, type(exc).__name__)
         return False

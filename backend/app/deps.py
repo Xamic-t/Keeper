@@ -10,6 +10,8 @@
   ③ require_csrf     —— 写操作防盗链（POST/PATCH/DELETE 挂）
   ④ Pagination       —— 列表接口的查询参数模型（page/size）
 
+require_owner 是功能权限（owner 才能进管理接口），W3 加 admin 接口时有了真实调用者才加回来。
+
 get_raw_session 是 W1 按 19.6 删掉、W2 又加回来的：登录和认证时还没有 user_id，
 不能走带 RLS 的 get_session。现在有真实调用者了。
 """
@@ -105,6 +107,22 @@ async def require_csrf(
             "CSRF 校验失败，请刷新页面后重试",
             status_code=status.HTTP_403_FORBIDDEN,
         )
+
+
+async def require_owner(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CurrentUser:
+    """功能权限：只有 owner 能进管理接口。
+
+    越权数据不靠这个挡——数据隔离是 RLS 的事；这里挡的是"这个功能你用不了"。
+    """
+    if user.role != "owner":
+        raise AppError(
+            ErrorCode.FORBIDDEN,
+            "没有权限",
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+    return user
 
 
 async def get_session(

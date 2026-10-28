@@ -1,0 +1,130 @@
+/* Keeper 设计基调（对齐 docs/design/style-preview-v5-dual.html）
+   暖米底 + 陶土橙强调色，圆角柔和，正文用系统字体。 */
+
+@import 'tailwindcss';
+
+@theme {
+  --color-bg: #faf7f2;
+  --color-bg-alt: #f5f0e8;
+  --color-surface: #ffffff;
+  --color-border: #eae2d6;
+  --color-border-strong: #dcd2c2;
+  --color-ink: #2b2622;
+  --color-ink-soft: #6f675e;
+  --color-accent: #d9694a;
+  --color-accent-soft: #fbeae4;
+  --color-accent-deep: #b9502f;
+  --color-success: #5b8c6e;
+  --color-success-soft: #e8f1ea;
+  --color-warn: #c08a2e;
+  --color-warn-soft: #fbf0dd;
+
+  --radius-card: 14px;
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    sans-serif;
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-bg);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+
+  button {
+    font: inherit;
+    cursor: pointer;
+  }
+
+  input,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+}
+
+@layer components {
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    box-shadow:
+      0 1px 2px rgb(43 38 34 / 4%),
+      0 4px 14px rgb(43 38 34 / 3.5%);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border-radius: 10px;
+    padding: 0.55rem 1rem;
+    font-weight: 500;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease,
+      opacity 0.15s ease;
+  }
+
+  .btn-primary {
+    background: var(--color-accent);
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: var(--color-accent-deep);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    border: 1px solid var(--color-border-strong);
+    color: var(--color-ink);
+  }
+
+  .btn-ghost:hover {
+    background: var(--color-bg-alt);
+  }
+
+  .input {
+    width: 100%;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 10px;
+    background: var(--color-surface);
+    padding: 0.55rem 0.75rem;
+    outline: none;
+  }
+
+  .input:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-soft);
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: var(--color-bg-alt);
+    color: var(--color-ink-soft);
+    padding: 0.1rem 0.55rem;
+    font-size: 12px;
+  }
+}

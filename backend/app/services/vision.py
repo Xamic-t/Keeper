@@ -139,29 +139,22 @@ class ModelReply:
 
 
 class VisionClient:
-    """统一模型入口。调用方只关心"给我 JSON"。"""
+    """统一模型入口。调用方只关心"给我 JSON"或"给我一段话"。"""
 
-    async def extract(
+    async def _dispatch(
         self,
+        content: list[dict[str, Any]],
         *,
-        prompt: str,
-        image: bytes | None = None,
-        text: str | None = None,
-        schema: dict[str, Any] | None = None,
-    ) -> ModelReply:
+        json_mode: bool,
+    ) -> tuple[Provider, str]:
+        """主备 + 重试的唯一实现。返回 (命中的通道, 原文)。"""
         providers = _providers()
         if not providers:
             raise AppError(
                 ErrorCode.AI_UPSTREAM_ERROR,
-                "还没有配置模型 API Key，抽取已暂停",
+                "还没有配置模型 API Key，AI 相关功能已暂停",
                 status_code=502,
             )
-
-        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
-        if text:
-            content.append({"type": "text", "text": f"原始文本：\n{text}"})
-        if image:
-            content.append(_image_part(image))
 
         last_error: Exception | None = None
         for provider in providers:
@@ -170,25 +163,15 @@ class VisionClient:
                 "messages": [{"role": "user", "content": content}],
                 "temperature": 0.1,
             }
-            if schema is not None:
+            if json_mode:
                 payload["response_format"] = {"type": "json_object"}
 
             for attempt in (1, 2):
                 try:
-                    raw = await _post(provider, payload)
-                    return ModelReply(
-                        parsed=parse_json(raw),
-                        raw=raw,
-                        provider=provider.name,
-                        model=provider.model,
-                    )
+                    return provider, await _post(provider, payload)
                 except httpx.TimeoutException:
-                    last_error = AppError(
-                        ErrorCode.AI_TIMEOUT, "模型响应超时", status_code=504
-                    )
-                    logger.warning(
-                        "vision timeout provider=%s attempt=%s", provider.name, attempt
-                    )
+                    last_error = AppError(ErrorCode.AI_TIMEOUT, "模型响应超时", status_code=504)
+                    logger.warning("vision timeout provider=%s attempt=%s", provider.name, attempt)
                 except httpx.HTTPError as exc:
                     last_error = AppError(
                         ErrorCode.AI_UPSTREAM_ERROR,
@@ -202,12 +185,43 @@ class VisionClient:
                         type(exc).__name__,
                     )
                 except AppError as exc:
-                    # 4xx / 非 JSON：这个通道废了，直接换下一个（重试也没意义）
+                    # 4xx：这个通道废了，直接换下一个（重试也没意义）
                     last_error = exc
                     break
 
         raise last_error or AppError(
             ErrorCode.AI_UPSTREAM_ERROR, "所有模型通道都失败了", status_code=502
+        )
+
+    async def extract(
+        self,
+        *,
+        prompt: str,
+        image: bytes | None = None,
+        text: str | None = None,
+        schema: dict[str, Any] | None = None,
+    ) -> ModelReply:
+        """要结构化结果：返回解析后的 JSON + 原文（原文要进审计表）。"""
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        if text:
+            content.append({"type": "text", "text": f"原始文本：\n{text}"})
+        if image:
+            content.append(_image_part(image))
+
+        provider, raw = await self._dispatch(content, json_mode=schema is not None)
+        return ModelReply(
+            parsed=parse_json(raw), raw=raw, provider=provider.name, model=provider.model
+        )
+
+    async def complete(self, *, prompt: str, text: str | None = None) -> ModelReply:
+        """要一段自由文本（综述这种）：不解析 JSON。"""
+        content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+        if text:
+            content.append({"type": "text", "text": text})
+
+        provider, raw = await self._dispatch(content, json_mode=False)
+        return ModelReply(
+            parsed={"text": raw}, raw=raw, provider=provider.name, model=provider.model
         )
 
 

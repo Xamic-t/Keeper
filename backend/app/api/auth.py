@@ -6,12 +6,13 @@
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.core.ratelimit import login_limiter
 from app.core.response import DataResponse, ok
 from app.core.security import create_session_token, generate_csrf_token
 from app.deps import CurrentUser, get_current_user, get_raw_session, get_session, require_csrf
@@ -89,12 +90,28 @@ def _user_out(user: User) -> UserOut:
     status_code=status.HTTP_200_OK,
 )
 async def login(
+    request: Request,
     payload: LoginRequest,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_raw_session)],
 ) -> dict[str, Any]:
-    """校验账号密码，签发 session（httpOnly）+ csrf（可读）两个 cookie。"""
+    """校验账号密码，签发 session（httpOnly）+ csrf（可读）两个 cookie。
+
+    限流：每 IP 每分钟最多 N 次（配置项 LOGIN_RATE_LIMIT）。账户本身还有"5 次错锁 15 分钟"，
+    两道防线分别挡"同账号爆破"和"批量扫号"。
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    allowed, retry_after = login_limiter.check(client_ip)
+    if not allowed:
+        raise AppError(
+            ErrorCode.RATE_LIMITED,
+            "尝试太频繁，请稍后再试",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={"retry_after": retry_after},
+        )
+
     user = await auth_service.authenticate(session, payload.username, payload.password)
+    login_limiter.reset(client_ip)
     user_out = _user_out(user)
     csrf_token = generate_csrf_token()
 

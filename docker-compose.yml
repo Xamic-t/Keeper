@@ -1,5 +1,5 @@
 # 三个容器：db（Postgres+pgvector）/ app（FastAPI）/ web（Caddy 托管前端并反代 API）
-# 首次启动前：cp .env.example .env 并填好 DB_PASSWORD
+# 首次启动前：cp .env.example .env 并填好 DB_PASSWORD 与 APP_DB_PASSWORD
 
 services:
   db:
@@ -8,8 +8,11 @@ services:
       POSTGRES_DB: keeper
       POSTGRES_USER: keeper
       POSTGRES_PASSWORD: ${DB_PASSWORD:?请在 .env 里设置 DB_PASSWORD}
+      # 初始化脚本用这个变量建 keeper_app 角色（应用连接用的非 owner 角色）
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-}
     volumes:
       - pg_data:/var/lib/postgresql/data
+      - ./db/init-keeper-app.sh:/docker-entrypoint-initdb.d/init-keeper-app.sh:ro
     ports:
       # 只绑定本机，供本地开发直连；生产环境删掉这一段
       - "127.0.0.1:5432:5432"
@@ -26,18 +29,33 @@ services:
         condition: service_healthy
     volumes:
       - ./data:/app/data
-      - ./backend/prompts:/app/prompts
+      - ./backend/prompts:/app/prompts:ro
     env_file: .env
+    environment:
+      # 容器内连库用 db 这个主机名；应用必须用 keeper_app，不能用 owner
+      DATABASE_URL: postgresql+psycopg://keeper_app:${APP_DB_PASSWORD}@db:5432/keeper
+      DATA_DIR: /app/data
+    expose:
+      - "8000"
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "uv run python -c \"import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/health')\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   web:
     build: ./frontend
     depends_on:
       - app
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - ./frontend/dist:/srv
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
+      - caddy_config:/config
     ports:
       - "80:80"
       - "443:443"
@@ -46,3 +64,4 @@ services:
 volumes:
   pg_data:      # 数据库卷，绝对不能丢
   caddy_data:   # 证书卷
+  caddy_config: # Caddy 配置卷

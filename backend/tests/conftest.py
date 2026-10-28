@@ -20,6 +20,7 @@ from sqlalchemy import bindparam, create_engine, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.ratelimit import login_limiter
 from app.core.security import hash_password
 from app.db import SessionLocal
 from app.main import app
@@ -93,6 +94,12 @@ async def raw_session() -> AsyncIterator[AsyncSession]:
     """系统级 session（不设 RLS 变量），等价于 deps.get_raw_session。"""
     async with SessionLocal() as session:
         yield session
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter() -> None:
+    """登录限流是进程级状态，不清会让用例之间互相影响。"""
+    login_limiter.clear()
 
 
 @pytest.fixture

@@ -38,9 +38,7 @@ async def list_ledger(
     if await session.get(Person, person_id) is None:
         raise AppError(ErrorCode.NOT_FOUND, "找不到这个人", status_code=404)
 
-    count_stmt = (
-        select(func.count()).select_from(Ledger).where(Ledger.person_id == person_id)
-    )
+    count_stmt = select(func.count()).select_from(Ledger).where(Ledger.person_id == person_id)
     stmt = (
         select(Ledger)
         .where(Ledger.person_id == person_id)
@@ -66,9 +64,7 @@ async def recalc_totals(session: AsyncSession, person_id: int) -> None:
             totals[direction] = Decimal(amount or 0)
 
     relationship = (
-        await session.execute(
-            select(Relationship).where(Relationship.person_id == person_id)
-        )
+        await session.execute(select(Relationship).where(Relationship.person_id == person_id))
     ).scalar_one_or_none()
     if relationship is None:
         return  # 数据不一致交给读档案时报错，这里不重复抛
@@ -80,9 +76,7 @@ async def recalc_totals(session: AsyncSession, person_id: int) -> None:
 
 async def sync_due_event(session: AsyncSession, ledger: Ledger) -> None:
     """把结款日同步到日历。没有结款日或已结清 → 删事件。"""
-    stmt = select(Event).where(
-        Event.source_type == "ledger", Event.source_id == ledger.id
-    )
+    stmt = select(Event).where(Event.source_type == "ledger", Event.source_id == ledger.id)
     existing = (await session.execute(stmt)).scalar_one_or_none()
 
     if ledger.due_date is None or ledger.settled_at is not None:
@@ -130,10 +124,10 @@ async def create_ledger(
         raise AppError(ErrorCode.NOT_FOUND, "找不到这个人", status_code=404)
     if kind not in LEDGER_KINDS:
         raise AppError(ErrorCode.VALIDATION_ERROR, "往来类型不合法", status_code=400)
+    if amount <= 0:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "金额必须大于 0", status_code=400)
     if due_date is not None and due_date < occurred_at:
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR, "结款日不能早于发生日", status_code=400
-        )
+        raise AppError(ErrorCode.VALIDATION_ERROR, "结款日不能早于发生日", status_code=400)
 
     ledger = Ledger(
         user_id=user_id,
@@ -172,9 +166,7 @@ async def update_ledger(
     if ledger.kind not in LEDGER_KINDS:
         raise AppError(ErrorCode.VALIDATION_ERROR, "往来类型不合法", status_code=400)
     if ledger.due_date is not None and ledger.due_date < ledger.occurred_at:
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR, "结款日不能早于发生日", status_code=400
-        )
+        raise AppError(ErrorCode.VALIDATION_ERROR, "结款日不能早于发生日", status_code=400)
 
     session.add(ledger)
     await recalc_totals(session, ledger.person_id)

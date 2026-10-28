@@ -1,0 +1,4 @@
+# pnpm 10+ 需要显式允许这几个包跑安装脚本（esbuild 要下二进制，vue-demi 要切 Vue 版本）
+allowBuilds:
+  esbuild: true
+  vue-demi: true

@@ -21,6 +21,7 @@ dependencies = [
     "pillow>=11.0",
     "lunar-python>=1.4",
     "chinesecalendar>=1.10",
+    "python-dateutil>=3.0.0",
 ]
 
 [dependency-groups]

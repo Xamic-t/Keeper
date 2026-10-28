@@ -238,6 +238,7 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 | 出站 HTTP | httpx | 调 DeepSeek / 通义 |
 | 模型 SDK | openai（官方 Python SDK） | DeepSeek 兼容 OpenAI 格式 |
 | 农历 | lunar-python + chinesecalendar | 农历生日、法定节假日 |
+| 重复规则 | python-dateutil | 日历事件的 `rrule` 展开（`rrulestr`） |
 | 向量 | pgvector（SQLAlchemy 扩展） | V2 的 RAG |
 
 **明确不用**：Redis、Celery、Django、Flask、Nginx、Kubernetes、GraphQL。
@@ -1041,6 +1042,20 @@ async def get_person(pid: int, session: Session = Depends(get_session)):
 
 **加回来都是 5-10 行的事**，但那一刻它会有真实调用者，能被验证。
 
+### 19.6.7 W3–W10 加回来的封装（都有真实调用者）
+
+| 封装 | 位置 | 为什么现在才加 |
+|---|---|---|
+| `get_raw_session` | `deps.py` | 登录与认证时还没有 user_id，不能走带 RLS 的 session |
+| `require_owner` | `deps.py` | W3 有了 admin 接口，功能权限第一次有真实调用者 |
+| `Pagination` | `deps.py` | 第一个列表接口（`/api/persons`）出现 |
+| `DataResponse` / `PageResponse` | `core/response.py` | 统一信封 `{data, meta}`，没有它就没法用 `response_model` |
+| `page_meta` | `core/response.py` | 分页 meta 的计算，抽出来只因为有三处列表接口 |
+| `verify_csrf` + `require_csrf` | `core/security.py` / `deps.py` | 有了写操作路由，CSRF 才有真实调用者 |
+| `RateLimiter` | `core/ratelimit.py` | 登录接口需要限流；框架没有现成机制，所以自己写（写清局限：进程内存） |
+| `storage` 三件套 | `services/storage.py` | 投喂链路开始有真实文件写入/删除 |
+| `notify` 通道降级 | `services/notify.py` | 有了推送通道数据，企微→PushPlus 的降级才有调用者 |
+
 #### 19.6.6 反例（这三种都算违规）
 
 | 反例 | 为什么违规 |
@@ -1247,6 +1262,7 @@ Python 从 Postgres 读
 | 日期 | 版本 | 变更 |
 |---|---|---|
 | 2026-10-28 | v1.0 | 首版：业务边界 + 工程规则 |
+| 2026-10-28 | v2.1 | W3–W10 交付后同步：7.6 补 `python-dateutil`；19.6 新增 19.6.7「W3–W10 加回来的封装」；15.2 改写为 `set_config` + `after_begin` 事件 |
 | 2026-10-28 | v2.0 | 补齐四块：① 为什么不选 Django/Flask（逐项对比）；② Python 语言规范 10 节（类型/命名/异常/异步/禁止清单）；③ FastAPI 最佳实践 5 组 + **框架最大化利用原则 22 行对照表**；④ 数据库连接方式与权限三入口（含 `SET LOCAL` vs `SET` 的坑）。同时修正 v1.0 中一处误植文本 |
 | 2026-10-28 | v2.3 | **19.7 重写为接入方案**：V1 不接（顺序问题，非不需要），V2 走侧车。新增三条不能破的前提、记忆三分法（业务事实严禁存入 Harness）、能力接入清单（接 4 项 / 不接 5 项）、架构影响清单、6 步落地流程 |
 | 2026-10-28 | v2.2 | 新增 19.7 **为什么不用 DeepSeek Harness**：它是通用 agent 运行时，我们的模型不做决策；列出三个代价、现有 5% 迷你 harness、V2 若要做对话式助理应做成侧车而非地基 |
