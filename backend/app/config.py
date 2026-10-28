@@ -40,14 +40,25 @@ class Settings(BaseSettings):
     secret_key: SecretStr = SecretStr("dev-only-secret-change-me")
     session_max_age: int = 604800  # 7 天，单位秒
     allow_registration: bool = False
+    # 登录接口每 IP 每分钟允许的尝试次数（W3 起生效）
+    login_rate_limit: int = 10
+
+    # ---- 存储 ----
+    # 上传原图落盘根目录（相对项目根）。容器里挂到 /app/data
+    data_dir: str = "data"
+    max_upload_mb: int = 8
+    max_upload_count: int = 10
 
     # ---- 模型 ----
     vision_provider: str = "deepseek"
     vision_model: str = "deepseek-flash"
+    vision_base_url: str = "https://api.deepseek.com/v1"
     deepseek_api_key: SecretStr | None = None
     fallback_provider: str = "qwen"
     fallback_model: str = "qwen-vl-max"
+    fallback_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     dashscope_api_key: SecretStr | None = None
+    vision_timeout_s: float = 60.0
 
     # ---- 推送 ----
     wecom_webhook: str | None = None

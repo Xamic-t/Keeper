@@ -8,6 +8,7 @@ from app.models.fact import Fact, Tag
 from app.models.input import ChatSegment, RawInput
 from app.models.ledger import Ledger
 from app.models.log import ExtractionLog
+from app.models.notification import NotificationChannel
 from app.models.person import Person
 from app.models.relationship import Relationship
 from app.models.todo import Todo
@@ -19,6 +20,7 @@ __all__ = [
     "ExtractionLog",
     "Fact",
     "Ledger",
+    "NotificationChannel",
     "Person",
     "RawInput",
     "Relationship",

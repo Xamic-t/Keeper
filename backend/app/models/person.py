@@ -6,7 +6,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Column, DateTime, Index, func, text
+from sqlalchemy import Column, DateTime, Index, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -38,6 +38,11 @@ class Person(SQLModel, table=True):
         sa_column=Column(JSONB, nullable=False, server_default=text("'{}'::jsonb")),
     )
     note: str | None = Field(default=None, max_length=2000)
+    # 画像综述（W7 起懒生成，≤150 字）。stale=True 表示"事实变了，该重写"
+    summary: str | None = Field(default=None, sa_column=Column(Text))
+    summary_stale: bool = Field(
+        default=True, nullable=False, sa_column_kwargs={"server_default": text("true")}
+    )
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     )

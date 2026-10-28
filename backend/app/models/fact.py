@@ -82,6 +82,8 @@ class Tag(SQLModel, table=True):
         Index("ix_tag_user_key_value", "user_id", "key", "value"),
         Index("ix_tag_person", "person_id"),
         Index("ix_tag_expires", "expires_at"),
+        # 派生标签靠它做 ON CONFLICT DO NOTHING，重复确认不会堆出一堆同义标签
+        Index("uq_tag_person_key_value", "person_id", "key", "value", unique=True),
     )
 
     id: int | None = Field(default=None, primary_key=True)
