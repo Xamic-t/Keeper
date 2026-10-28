@@ -383,11 +383,16 @@ async def persist_candidates(
         session.add(person)
 
 
-async def extract_from_raw_input(raw_input_id: int, user_id: int) -> ExtractionResult:
+async def extract_from_raw_input(
+    raw_input_id: int, user_id: int, forced_person_id: int | None = None
+) -> ExtractionResult:
     """编排整个抽取流程。**自己开 session**，绝不复用请求的。
 
     `user_id` 必须由调用方传进来：raw_inputs 是 RLS 表，**先设变量才能查**，
     否则第一次查询就会因为拿不到 app.user_id 而报错。
+
+    `forced_person_id`：归属待定材料被用户指定了人后重抽时用。设了就把抽取结果
+    的归属强制成这个人，不再信模型的归属判断（用户已经拍了板）。
 
     任何失败都写进 raw_inputs.status='failed'，不向上抛——后台任务没有请求上下文，
     抛出去只会变成一个没人看的堆栈。
@@ -418,6 +423,8 @@ async def extract_from_raw_input(raw_input_id: int, user_id: int) -> ExtractionR
                 schema={"type": "object"},
             )
             result = parse_result(reply.parsed, await _candidates(session))
+            if forced_person_id is not None:
+                result.person_id = forced_person_id
 
             await persist_candidates(
                 session,

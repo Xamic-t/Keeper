@@ -143,6 +143,7 @@ export interface ConfirmationItem {
   evidence: string | null
   raw_input_id: number | null
   thumb_url: string | null
+  kind: string
   created_at: string
 }
 

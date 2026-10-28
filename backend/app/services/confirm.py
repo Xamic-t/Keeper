@@ -67,6 +67,8 @@ class ConfirmationItem:
     evidence: str | None
     raw_input_id: int | None
     created_at: datetime
+    # fact = 已归属的事实卡片；unassigned = 归属待定的材料（id 是 raw_input.id）
+    kind: str = "fact"
 
 
 @dataclass(slots=True)
@@ -306,6 +308,7 @@ async def list_confirmations(session: AsyncSession) -> list[ConfirmationGroup]:
                     evidence=None,
                     raw_input_id=raw_input.id,
                     created_at=raw_input.created_at,
+                    kind="unassigned",
                 )
             )
         grouped[0] = ConfirmationGroup(person_id=None, nickname="归属待定", items=items)

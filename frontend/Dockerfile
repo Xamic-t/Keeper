@@ -5,15 +5,16 @@ WORKDIR /app
 
 RUN corepack enable
 
-COPY package.json pnpm-lock.yaml* ./
+# pnpm-workspace.yaml 里的 allowBuilds 得在 install 前就在，否则 esbuild/vue-demi 会被 pnpm 拦掉
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml ./
 RUN pnpm install --no-frozen-lockfile
 
 COPY . .
 RUN pnpm build
 
-FROM alpine:3.20
+FROM caddy:2-alpine
 
 WORKDIR /srv
 COPY --from=build /app/dist /srv
 
-CMD ["true"]
+# Caddyfile 由 docker-compose 挂进 /etc/caddy/Caddyfile，保持可改

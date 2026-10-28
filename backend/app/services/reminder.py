@@ -35,13 +35,14 @@ PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 PROMPT_VERSION = "v1"
 
 # 各类型的提醒档位（距当天几天）
+# 节日是 T-3 而非 T-2：库里 ck_reminder_level 只允许 d7/d3/d0
 LEVELS: dict[str, tuple[int, ...]] = {
     "birthday": (7, 3, 0),
     "payment_due": (3, 0),
-    "festival": (2,),
+    "festival": (3,),
     "custom": (3, 0),
 }
-LEVEL_NAMES = {7: "d7", 3: "d3", 0: "d0", 2: "d2"}
+LEVEL_NAMES = {7: "d7", 3: "d3", 0: "d0"}
 # 扫描窗口：未来 7 天
 SCAN_DAYS = 7
 
@@ -301,14 +302,18 @@ async def run_daily(session: AsyncSession, today: date | None = None) -> ScanRes
     result = ScanResult()
 
     for draft in await scan_due_events(session, reference):
-        reminder, created = await upsert_reminder(session, draft)
-        if created:
-            result.created += 1
-        if reminder.status == "sent":
-            continue
-        if await send(session, reminder):
-            result.sent += 1
-        else:
+        try:
+            reminder, created = await upsert_reminder(session, draft)
+            if created:
+                result.created += 1
+            if reminder.status == "sent":
+                continue
+            if await send(session, reminder):
+                result.sent += 1
+            else:
+                result.failed += 1
+        except Exception:  # noqa: BLE001 — 单条失败不能带崩其他人的提醒
+            logger.exception("reminder failed event_id=%s", draft.event_id)
             result.failed += 1
     return result
 

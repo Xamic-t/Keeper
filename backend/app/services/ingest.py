@@ -11,11 +11,11 @@
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, ErrorCode
-from app.models.input import RawInput
+from app.models.input import ChatSegment, RawInput
 from app.models.person import Person
 from app.services import extract, storage
 
@@ -152,9 +152,31 @@ async def get_raw_input(session: AsyncSession, raw_input_id: int) -> RawInput:
     return raw_input
 
 
-async def run_extraction(raw_input_id: int, user_id: int) -> None:
+async def assign_person(
+    session: AsyncSession, raw_input_id: int, user_id: int, person_id: int
+) -> RawInput:
+    """把归属待定的材料指给一个人：改材料 + 改它下面的对话片段。重抽由调用方触发。"""
+    raw_input = await get_raw_input(session, raw_input_id)
+    if await session.get(Person, person_id) is None:
+        raise AppError(ErrorCode.NOT_FOUND, "找不到这个人", status_code=404)
+
+    raw_input.person_id = person_id
+    session.add(raw_input)
+    await session.execute(
+        update(ChatSegment)
+        .where(ChatSegment.raw_input_id == raw_input_id)
+        .values(person_id=person_id)
+    )
+    await session.commit()
+    return raw_input
+
+
+async def run_extraction(
+    raw_input_id: int, user_id: int, forced_person_id: int | None = None
+) -> None:
     """后台任务入口。异常在里面全部吃掉，这里只做转调。
 
     `user_id` 要跟着走：后台任务自己开 session，RLS 变量得有人告诉它是谁的活。
+    `forced_person_id`：归属待定被指定人后重抽，强制归属不再让模型猜。
     """
-    await extract.extract_from_raw_input(raw_input_id, user_id)
+    await extract.extract_from_raw_input(raw_input_id, user_id, forced_person_id)

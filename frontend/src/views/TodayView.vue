@@ -10,11 +10,18 @@ import PageHeader from '@/components/PageHeader.vue'
 const router = useRouter()
 const view = ref<TodayView | null>(null)
 const loading = ref(true)
+const error = ref('')
+
+function showError(err: unknown, fallback: string) {
+  error.value = err instanceof Error ? err.message : fallback
+}
 
 async function load() {
   loading.value = true
   try {
     view.value = await api.get<TodayView>('/today')
+  } catch (err) {
+    showError(err, '今天的数据没取到，刷新试试')
   } finally {
     loading.value = false
   }
@@ -22,8 +29,24 @@ async function load() {
 
 async function completeTodo(sourceId: number | null) {
   if (!sourceId) return
-  await api.patch(`/todos/${sourceId}`, { status: 'done' })
-  await load()
+  error.value = ''
+  try {
+    await api.patch(`/todos/${sourceId}`, { status: 'done' })
+    await load()
+  } catch (err) {
+    showError(err, '完成失败')
+  }
+}
+
+async function toTodo(sourceId: number | null) {
+  if (!sourceId) return
+  error.value = ''
+  try {
+    await api.post(`/reminders/${sourceId}/to-todo`)
+    await load()
+  } catch (err) {
+    showError(err, '转待办失败')
+  }
 }
 
 onMounted(load)
@@ -34,6 +57,8 @@ onMounted(load)
     <PageHeader title="今天" :subtitle="view?.date ?? ''" />
 
     <div v-if="loading" class="text-sm text-ink-soft">加载中…</div>
+
+    <p v-else-if="error" class="mb-3 rounded-md bg-warn/10 px-3 py-2 text-sm text-warn">{{ error }}</p>
 
     <template v-else-if="view">
       <!-- 待确认 -->
@@ -68,6 +93,13 @@ onMounted(load)
               <div class="font-medium">{{ task.title }}</div>
               <div v-if="task.subtitle" class="truncate text-sm text-ink-soft">{{ task.subtitle }}</div>
             </div>
+            <button
+              v-if="task.type === 'reminder'"
+              class="shrink-0 text-sm text-ink-soft hover:text-accent"
+              @click="toTodo(task.source_id)"
+            >
+              转待办
+            </button>
             <button
               v-if="task.type === 'todo'"
               class="shrink-0 text-sm text-ink-soft hover:text-success"

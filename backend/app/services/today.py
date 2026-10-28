@@ -30,7 +30,7 @@ RECENT_LIMIT = 3
 TODO_WINDOW_DAYS = 3
 
 # 提醒档位权重：T-0 最急
-LEVEL_PRIORITY = {"d0": 0, "d2": 1, "d3": 2, "d7": 3}
+LEVEL_PRIORITY = {"d0": 0, "d3": 1, "d7": 2}
 
 
 @dataclass(slots=True)

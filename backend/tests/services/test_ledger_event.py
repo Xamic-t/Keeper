@@ -217,6 +217,28 @@ async def test_festival_event_cannot_have_person(single_user: Account) -> None:
             )
 
 
+async def test_lunar_birthday_not_duplicated_in_calendar(single_user: Account) -> None:
+    """农历生日既有事件、又在关系表里，日历上只能出现一次（评审 P1-4）。"""
+    person_id = await _person(single_user)
+
+    async with rls_session(single_user.id) as session:
+        await event_service.create_event(
+            session,
+            single_user.id,
+            type="birthday",
+            title="王姐生日",
+            occurs_on=date(2027, 1, 1),
+            person_id=person_id,
+            lunar={"month": 2, "day": 13, "is_leap": False},
+        )
+
+    async with rls_session(single_user.id) as session:
+        items = await event_service.list_events(session, date(2027, 1, 1), date(2027, 12, 31))
+
+    birthdays = [item for item in items if item.type == "birthday" and item.person_id == person_id]
+    assert len(birthdays) == 1
+
+
 async def test_delete_ledger_missing_returns_404(single_user: Account) -> None:
     async with rls_session(single_user.id) as session:
         with pytest.raises(AppError) as error:

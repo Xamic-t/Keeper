@@ -88,8 +88,10 @@ async def expand_events(session: AsyncSession, start: date, end: date) -> list[C
                     )
                 )
 
+    # 已经有一条农历生日事件的人，别再靠关系表重复生成
+    covered = {event.person_id for event in events if event.type == "birthday" and event.lunar}
     # 只查一次关系表，批量判断谁家生日是农历补充进私人日历
-    items.extend(await _relationship_birthdays(session, start, end))
+    items.extend(await _relationship_birthdays(session, start, end, covered))
 
     for item in festival_service.get_festivals(start.year):
         if start <= item.day <= end:
@@ -130,9 +132,10 @@ def _expand_lunar_birthday(event: Event, start: date, end: date) -> list[Calenda
 
 
 async def _relationship_birthdays(
-    session: AsyncSession, start: date, end: date
+    session: AsyncSession, start: date, end: date, covered: set[int] | None = None
 ) -> list[CalendarItem]:
     """关系里存了农历生日、但用户没手动建事件时，也要出现在日历上。"""
+    covered = covered or set()
     stmt = (
         select(Relationship, Person.nickname)
         .join(Person, Person.id == Relationship.person_id)
@@ -142,6 +145,9 @@ async def _relationship_birthdays(
 
     items: list[CalendarItem] = []
     for relationship, nickname in rows:
+        if relationship.person_id in covered:
+            # 这个人已经有一条农历生日事件，别重复生成
+            continue
         lunar = relationship.birthday_lunar or {}
         month = int(lunar.get("month") or 0)
         day = int(lunar.get("day") or 0)

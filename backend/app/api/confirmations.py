@@ -25,6 +25,7 @@ class ConfirmationItemOut(BaseModel):
     evidence: str | None = None
     raw_input_id: int | None = None
     thumb_url: str | None = Field(default=None, description="有原图时给缩略图地址")
+    kind: str = "fact"
     created_at: datetime
 
 
@@ -82,6 +83,7 @@ async def list_confirmations(
                         evidence=item.evidence,
                         raw_input_id=item.raw_input_id,
                         thumb_url=_thumb(item.raw_input_id),
+                        kind=item.kind,
                         created_at=item.created_at,
                     )
                     for item in group.items

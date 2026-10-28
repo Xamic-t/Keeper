@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
 from app.core.security import hash_password
-from app.deps import CurrentUser, get_session, require_owner
+from app.deps import CurrentUser, get_session, require_csrf, require_owner
 from app.models.user import User
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
@@ -79,6 +79,7 @@ async def list_users(
     "",
     response_model=DataResponse[UserOut],
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_csrf)],
     summary="建号",
 )
 async def create_user(
@@ -124,6 +125,7 @@ async def create_user(
 @router.patch(
     "/{user_id}",
     response_model=DataResponse[UserOut],
+    dependencies=[Depends(require_csrf)],
     summary="禁用 / 重置密码",
 )
 async def update_user(

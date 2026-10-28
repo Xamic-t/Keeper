@@ -1,7 +1,7 @@
 # HANDOFF · 开发交接说明
 
 > **这份文档给接手开发的 Agent 看。** 读完它，你应该知道：做什么、读什么、按什么顺序做、怎么算做完。
-> 最后更新：2026-10-28 · 当前进度 **W2–W10 代码写完，W8–W10 在真实环境跑不通（已定位，见第零节）**
+> 最后更新：2026-10-29 · 当前进度 **W11（修 P0 + 补测试）、W12（补 P1 交互闭环）已完成，主线「提醒推送」跑通；剩 P2/P3 清债 + W13 真实验收**
 
 ---
 
@@ -17,25 +17,24 @@
 | 登录 / 人 / 往来 / 待办 / 日历 | ✅ 完 | ✅ **能跑** | — |
 | 投喂 → 抽取 → 确认 | ✅ 完 | ⬜ **待验收**（要你填模型 Key + 30 张真实截图） | Key |
 | 人物综述 | ✅ 完 | ✅ 能跑（要手动点"重写"） | 懒生成没做，刻意取舍 |
-| **每日提醒 + 推送** | ✅ 完 | ❌ **必崩** | P0-1：session 没设 RLS 变量 |
-| **节日提醒** | ✅ 完 | ❌ **必被数据库拒** | P0-2：`d2` 档位不在 CHECK 允许范围 |
-| **生产部署（前端）** | ✅ 完 | ❌ **web 容器是空壳** | P0-3：镜像里没有 Caddy |
+| **每日提醒 + 推送** | ✅ 完 | ✅ **能跑**（W11 修好） | 原 P0-1：session 没设 RLS 变量 |
+| **节日提醒** | ✅ 完 | ✅ **能写进库**（W11 修好） | 原 P0-2：`d2` 档位不在 CHECK 允许范围 |
+| **生产部署（前端）** | ✅ 完 | ✅ **Caddy 能起**（W11 修好） | 原 P0-3：镜像里没有 Caddy |
 
 三个 P0 **都已在真实数据库上实测复现**，不是推测。证据和修法见
 **[`docs/15-代码评审报告.md`](./docs/15-代码评审报告.md)**（共 28 条：3 P0 / 5 P1 / 12 P2 / 8 P3）。
 
 ### 你接手后的第一件事
 
-**不是写代码，是先修这三条 P0**（约 60 行改动，报告里给了可直接粘贴的修法）：
+**P0 三条 + P1 五条已在 W11/W12 修完**（见 `docs/W11-完成报告.md` / `docs/W12-完成报告.md`），
+主流程已实测跑通。接下来是：
 
 ```
-1. backend/app/jobs/daily.py        → 按用户逐个开 session，各自带 rls_user_id
-2. backend/app/services/reminder.py → 节日档位 T-2 → T-3（同步 today.py 的 LEVEL_PRIORITY）
-3. frontend/Dockerfile              → 最后阶段换成 caddy:2-alpine
-4. backend/app/api/admin.py         → 建号/改号两个接口补 require_csrf
+1. 按 docs/待填写清单.md 填模型 Key + 30 张真实截图 → W13 真实验收
+2. 按 docs/15-代码评审报告.md 第三、四节清 P2（12 条）/ P3（8 条）债
 ```
 
-修完用这条命令验证（报告里给了对应的测试用例）：
+验收命令（修完后应全部通过）：
 
 ```bash
 cd backend && uv run python -m app.jobs.daily
@@ -150,10 +149,10 @@ cd backend && uv run python -m app.jobs.daily
 
 | 阶段 | 做什么 | 具体动作（逐文档） | 完成判据 |
 |---|---|---|---|
-| **W11 · 修 P0** | 让主线跑通 | ① `jobs/daily.py` 按用户逐个开 session<br>② `reminder.py` 节日 T-2→T-3，同步 `today.py:33`<br>③ `frontend/Dockerfile` 换 `caddy:2-alpine`<br>④ `api/admin.py` 两个接口补 `require_csrf`<br>⑤ 在 `docs/15-代码评审报告.md` 勾掉这 4 条 | `uv run python -m app.jobs.daily` 不再抛异常，且 `created>0` |
-| **W11 · 补测试** | 堵住漏网 | 新增 3 个测试文件（报告第五节给了用例）：<br>`tests/services/test_daily_job.py`<br>`tests/services/test_festival.py`<br>`tests/services/test_extract_parse.py` | 3 个文件全绿，且**故意改坏 P0 的修法时测试会红** |
-| **W12 · 补 P1** | 交互闭环 | ① 后端新增 `POST /api/raw-inputs/{id}/assign`<br>② `ConfirmView.vue` 按 `kind` 分叉 + 全部请求加 catch<br>③ `TodayView.vue` 提醒卡片加"转待办"<br>④ `event.py` 农历生日去重<br>⑤ `ingest.py` 边读边截断 | 归属待定的卡片能真正指派给人并抽出事实 |
-| **W13 · 真实验收** | 用户上手 | 按 `docs/待填写清单.md`：填 Key → 30 张截图 → 统计准确率 → 切模型 | 事实准确率 ≥75%，金额/日期 ≥95% |
+| **W11 · 修 P0** | ✅ **完成** | ① `jobs/daily.py` 按用户逐个开 session<br>② `reminder.py` 节日 T-2→T-3，同步 `today.py`<br>③ `frontend/Dockerfile` 换 `caddy:2-alpine`<br>④ `api/admin.py` 两个接口补 `require_csrf`<br>⑤ 已在 `docs/15` 勾掉 | `uv run python -m app.jobs.daily` 不再抛异常；`docker compose build web` 成功 |
+| **W11 · 补测试** | ✅ **完成** | 新增 `test_daily_job.py` / `test_festival.py` / `test_extract_parse.py` | 105 个测试全绿 |
+| **W12 · 补 P1** | ✅ **完成** | ① 后端 `POST /api/raw-inputs/{id}/assign` + `forced_person_id`<br>② `ConfirmView.vue` 按 `kind` 分叉 + catch<br>③ `TodayView.vue` 加"转待办"<br>④ `event.py` 农历去重<br>⑤ `ingest.py` 边读边截断 | 见 `docs/W12-完成报告.md`，单测锁住强制归属 |
+| **W13 · 真实验收** | ⬜ **等你填 Key** | 按 `docs/待填写清单.md`：填 Key → 30 张截图 → 统计准确率 → 切模型 | 事实准确率 ≥75%，金额/日期 ≥95% |
 | **W14+ · 按反馈改** | 打磨 | 改 3 个 prompt（`prompts/v1_*.md`，版本升 v2）<br>改 `DAILY_TEMPLATE`、`LEVELS`、配色 | 用户说"这个我天天用" |
 
 **每个阶段结束必须 commit + push（带代理），并在 `docs/W{N}-完成报告.md` 写一份简报。**
@@ -367,3 +366,4 @@ git -c http.proxy=http://127.0.0.1:7897 \
 | 2026-10-28 | v1.1 | W2 完成：状态表、必读顺序、排期、验收清单、遗留项全部回填；新增两条 W3 待办 |
 | 2026-10-28 | v1.2 | W3–W10 全部完成：45 个接口 + 8 个前端页面 + 部署脚本；必读清单改为「待填写清单」；遗留项换成待你处理的三条 |
 | 2026-10-28 | **v1.3** | **全量代码评审后重写**：新增第零节「当前真实状态」；排期改成「已完成 / 下一步 W11-14 / 最终目标」；新增 W11 验收命令与第十二节 28 个缺陷清单；必读清单第 0 位改成评审报告 |
+| 2026-10-29 | **v1.4** | **W11+W12 完成**：P0 三条 + P1 五条全修（见 `W11/W12-完成报告.md`）；每日任务、节日提醒、生产 web 容器实测跑通；测试 88 → 105；下一步是 W13 真实验收（等你填 Key + 30 张截图）与 P2/P3 清债 |

@@ -58,6 +58,10 @@ class TextIngestIn(BaseModel):
     person_id: int | None = None
 
 
+class AssignIn(BaseModel):
+    person_id: int = Field(description="把这批材料指给这个人")
+
+
 def _sniff_suffix(content: bytes) -> str | None:
     """按魔数判断图片类型。识别不出返回 None。"""
     for magic, suffix in _MAGIC:
@@ -95,7 +99,8 @@ async def upload_images(
     limit = settings.max_upload_mb * 1024 * 1024
     items: list[UploadItem] = []
     for upload in files:
-        content = await upload.read()
+        # 只读 limit+1 字节：超了立刻能判断，不用把整个文件读进内存
+        content = await upload.read(limit + 1)
         if len(content) > limit:
             raise AppError(
                 ErrorCode.FILE_TOO_LARGE,
@@ -218,3 +223,35 @@ async def get_raw_input_file(
     if not raw_input.file_path or not Path(raw_input.file_path).exists():
         raise AppError(ErrorCode.NOT_FOUND, "原图已删除", status_code=404)
     return FileResponse(raw_input.file_path)
+
+
+@router.post(
+    "/raw-inputs/{raw_input_id}/assign",
+    response_model=DataResponse[RawInputOut],
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="归属待定材料指定人",
+    dependencies=[Depends(require_csrf)],
+)
+async def assign_raw_input(
+    raw_input_id: int,
+    payload: AssignIn,
+    background: BackgroundTasks,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """把 AI 判不出是谁的材料指给一个人，然后立刻重抽，事实才会真正落出来。"""
+    raw_input = await ingest_service.assign_person(
+        session, raw_input_id, user.id, payload.person_id
+    )
+    background.add_task(ingest_service.run_extraction, raw_input.id, user.id, payload.person_id)
+    return ok(
+        RawInputOut(
+            id=raw_input.id or 0,
+            kind=raw_input.kind,
+            status=raw_input.status,
+            person_id=raw_input.person_id,
+            error_msg=raw_input.error_msg,
+            created_at=raw_input.created_at,
+            processed_at=raw_input.processed_at,
+        )
+    )
