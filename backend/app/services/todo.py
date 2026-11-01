@@ -12,7 +12,7 @@ import logging
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, ErrorCode
@@ -130,6 +130,18 @@ async def ensure_daily_template(session: AsyncSession, user_id: int, today: date
     "今天复盘数据"这种事昨天没做就算了，不能今天还在今日页挂一条昨天的，
     否则几天不打开就堆出十条一模一样的，清单就没法看了。
     """
+    # 并发保护（评审 P2-4）：先查后插之间有窗口，两个请求同时进来会各插一遍。
+    # 用事务级 advisory lock 把"这个人这一天"锁住，第二个请求会等第一个提交，
+    # 再查就能看到已存在。
+    #
+    # 为什么不用唯一索引：模板一天本来就是 3 条，
+    # (user_id, source, due_date) 会把 3 条压成 1 条；
+    # 把 title 也加进唯一键，又会让"把待办改名成另一个模板标题"这句用户操作直接报错。
+    # 锁的范围只有这一天，代价可以忽略。
+    await session.execute(
+        select(func.pg_advisory_xact_lock(user_id, today.toordinal()))
+    )
+
     stale = (
         (
             await session.execute(

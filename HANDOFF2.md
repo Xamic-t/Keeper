@@ -113,7 +113,7 @@
 | P2-6 图片 MIME 永远写 `image/jpeg` | ✅ 已修 | 按字节嗅探真实类型，png/webp 不再标成 jpeg |
 | P2-8 提醒模板 `{tags}` 永远空 | ✅ 已修 | 查 tags 并过滤过期，渲染成 `[{"key","value"}]` |
 | P3-1 前端页面零错误处理 | ✅ 已修（实际只剩两页） | 待办页 / 设置页加 catch + 页内错误条 |
-| P2-4 `ensure_daily_template` 并发重复 | ⬜ 未做 | 要加 `(user_id, source, due_date)` 唯一索引 → 先改 `docs/06` 再加 migration 0006，单独一轮做 |
+| P2-4 `ensure_daily_template` 并发重复 | ✅ 已修 | **评审建议的唯一索引是错的**（模板一天 3 条会被压成 1 条）；改用事务级 advisory lock，不动表结构 |
 
 细节见 `docs/21-剩余清债与业务时区.md`。同一份文档里还记了一条更严重的：
 
@@ -125,7 +125,6 @@
 
 | 条目 | 为什么值得做 |
 |---|---|
-| P2-4 每日模板并发重复 | 加唯一索引更稳，但要动数据库 |
 | P3-2 `limit` 没有上限 | `api/persons.py` 可传 `limit=99999` |
 | P3-5 `ratelimit._hits` 只增不减 | IP 多了会慢慢涨 |
 | P3-7 `avatar_path` 只出不进 | 全项目没有写入点，永远为 None |
@@ -216,7 +215,7 @@ cd backend && uv run python scripts/test_extraction.py --score ~/testdata/screen
 cd backend && uv run alembic current   # 应为 0005 (head)
 ```
 
-**当前基线**：129 测试通过 · ruff 干净 · vue-tsc 无错 · 迁移 0005
+**当前基线**：131 测试通过 · ruff 干净 · vue-tsc 无错 · 迁移 0005
 
 ---
 
@@ -227,4 +226,4 @@ cd backend && uv run alembic current   # 应为 0005 (head)
 | 2026-11-01 | 首版：W12 完成、W13 进行中的真实状态；重排 W13–W16；补环境坑与产品待定项 |
 | 2026-11-01 | 日历页接入 FullCalendar 6.x（`docs/19`）；新增环境坑：装完依赖必须重启 vite |
 | 2026-11-01 | W13-B 对话式投喂完成（`docs/20`）；W15 清掉 P2-1 / P2-2；基线 106 → 120 |
-| 2026-11-02 | 清 P2-6 / P2-8 / P2-12 / P3-1，修业务时区（`docs/21`）；设置页可配 PushPlus；基线 120 → 129 |
+| 2026-11-02 | 清 P2-6 / P2-8 / P2-12 / P3-1 + P2-4（改用 advisory lock），修业务时区（`docs/21`）；设置页可配 PushPlus；基线 120 → 131 |
