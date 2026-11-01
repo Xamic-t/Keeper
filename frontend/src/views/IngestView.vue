@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
 import type { RawInputOut } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 
+const router = useRouter()
 const items = ref<RawInputOut[]>([])
 const text = ref('')
 const uploading = ref(false)
@@ -82,7 +84,12 @@ onMounted(load)
 
 <template>
   <div class="mx-auto max-w-2xl">
-    <PageHeader title="投喂" subtitle="把聊天截图丢进来，系统替你记住" />
+    <PageHeader
+      title="投喂"
+      subtitle="把聊天截图丢进来，系统替你记住"
+      action-label="切换到对话"
+      @action="router.push({ name: 'chat' })"
+    />
 
     <section class="card mb-4 p-4">
       <h2 class="mb-2 text-sm font-medium">批量上传截图</h2>

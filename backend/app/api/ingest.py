@@ -19,14 +19,9 @@ from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
 from app.services import ingest as ingest_service
 from app.services.ingest import UploadItem
+from app.services.storage import sniff_image_suffix
 
 router = APIRouter(tags=["ingest"])
-
-# 图片头魔数 → 后缀。不信 content-type，只信字节。
-_MAGIC = (
-    (b"\xff\xd8\xff", "jpg"),
-    (b"\x89PNG\r\n\x1a\n", "png"),
-)
 
 
 class IngestItemOut(BaseModel):
@@ -62,16 +57,6 @@ class TextIngestIn(BaseModel):
 
 class AssignIn(BaseModel):
     person_id: int = Field(description="把这批材料指给这个人")
-
-
-def _sniff_suffix(content: bytes) -> str | None:
-    """按魔数判断图片类型。识别不出返回 None。"""
-    for magic, suffix in _MAGIC:
-        if content.startswith(magic):
-            return suffix
-    if len(content) > 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
-        return "webp"
-    return None
 
 
 @router.post(
@@ -110,7 +95,7 @@ async def upload_images(
                 status_code=413,
                 detail={"max_mb": settings.max_upload_mb},
             )
-        suffix = _sniff_suffix(content)
+        suffix = sniff_image_suffix(content)
         if suffix is None:
             raise AppError(
                 ErrorCode.VALIDATION_ERROR,

@@ -204,3 +204,21 @@ export interface RawInputOut {
   created_at: string
   processed_at: string | null
 }
+
+/** 对话接口的返回。对应 docs/07 5.1「对话」那张响应表。 */
+export interface ChatFactRef {
+  id: number | null
+  content: string
+  evidence: string | null
+}
+
+export interface ChatReply {
+  reply: string
+  /** feed = 投喂回执，query = 检索回答，clarify = 反问是谁 */
+  intent: 'feed' | 'query' | 'clarify' | string
+  person_id: number | null
+  nickname: string | null
+  facts: ChatFactRef[]
+  raw_input_id: number | null
+  pending_count: number
+}

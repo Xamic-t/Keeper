@@ -30,6 +30,26 @@ def compute_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+# 图片头魔数 → 后缀。不信 content-type，只信字节。
+_MAGIC = (
+    (b"\xff\xd8\xff", "jpg"),
+    (b"\x89PNG\r\n\x1a\n", "png"),
+)
+
+
+def sniff_image_suffix(content: bytes) -> str | None:
+    """按魔数判断图片类型。识别不出返回 None。
+
+    投喂接口和对话接口都要用，所以放在这里，两边共用一份规则。
+    """
+    for magic, suffix in _MAGIC:
+        if content.startswith(magic):
+            return suffix
+    if len(content) > 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
 def save_upload(user_id: int, raw_input_id: int, content: bytes, suffix: str) -> str:
     """写文件并返回相对路径（存进 raw_inputs.file_path）。"""
     suffix = suffix.lower().lstrip(".")
