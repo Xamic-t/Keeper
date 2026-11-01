@@ -3,10 +3,10 @@
 用法（在 backend/ 目录下）：
 
     # 先跑 3 张试试水
-    uv run python scripts/test_extraction.py --dir ~/testdata/screenshots --user va --limit 3
+    uv run python scripts/test_extraction.py --dir ~/testdata/screenshots --limit 3
 
     # 全量
-    uv run python scripts/test_extraction.py --dir ~/testdata/screenshots --user va
+    uv run python scripts/test_extraction.py --dir ~/testdata/screenshots
 
     # 你在核对表里把抽错的条目标成 [x]，然后算准确率
     uv run python scripts/test_extraction.py --score ~/testdata/抽取核对.md
@@ -86,17 +86,25 @@ class Item:
     raw_reply: str = ""
 
 
-async def _find_user(username: str) -> int:
-    """按登录名找 user_id。users 表没开 RLS，用无变量的 session 就行。"""
+async def _find_user(username: str | None) -> int:
+    """找 user_id。users 表没开 RLS，用无变量的 session 就行。
+
+    不传 username 就取 owner 账号——账号名会改，写死名字迟早失效。
+    """
     async with SessionLocal() as session:
-        user = (
-            await session.execute(select(User).where(User.username == username.strip()))
-        ).scalar_one_or_none()
+        if username:
+            user = (
+                await session.execute(select(User).where(User.username == username.strip()))
+            ).scalar_one_or_none()
+        else:
+            user = (
+                await session.execute(
+                    select(User).where(User.role == "owner").order_by(User.id)
+                )
+            ).scalars().first()
         if user is None or user.id is None:
-            raise SystemExit(
-                f"找不到账号 {username!r}。\n"
-                f"先在系统里登录取一个账号，或用 --user 指定正确的登录名。"
-            )
+            hint = f"找不到账号 {username!r}。" if username else "库里没有 owner 账号。"
+            raise SystemExit(f"{hint}\n用 --user 指定登录名，或先在系统里建一个账号。")
         return user.id
 
 
@@ -496,7 +504,9 @@ def main() -> int:
         default=None,
         help="直接指定几张图（和 --dir 二选一），例如 --files ~/a.png ~/b.png",
     )
-    parser.add_argument("--user", default="va", help="用哪个账号跑（登录名），默认 va")
+    parser.add_argument(
+        "--user", default=None, help="用哪个账号跑（登录名），不填就取 owner 账号"
+    )
     parser.add_argument("--person-id", type=int, default=None, help="强制挂到某个人身上")
     parser.add_argument("--limit", type=int, default=None, help="只跑前 N 张")
     parser.add_argument("--out", default=None, help="核对表输出路径")
