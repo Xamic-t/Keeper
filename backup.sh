@@ -19,5 +19,7 @@ docker compose exec -T db pg_dump -U keeper -d keeper --clean --if-exists > "$FI
 find "$OUT_DIR" -name 'keeper-*.sql' -mtime +30 -delete
 
 SIZE=$(du -h "$FILE" | cut -f1)
-echo "完成：$FILE（$SIZE）"
-echo "恢复命令：docker compose exec -T db psql -U keeper -d keeper < $FILE"
+# 变量名后面紧跟中文标点时必须加花括号：不加的话 bash 会把「（」当成变量名的一部分，
+# 报 "FILE（: unbound variable"，备份脚本自己先挂掉。（2026-11-02 实测踩到）
+echo "完成：${FILE}（${SIZE}）"
+echo "恢复命令：docker compose exec -T db psql -U keeper -d keeper < ${FILE}"

@@ -13,6 +13,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Index,
+    Text,
     func,
     text,
 )
@@ -88,6 +89,9 @@ class Reminder(SQLModel, table=True):
         sa_column_kwargs={"server_default": "pending"},
     )
     sent_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    # 没发出去时写原因（没配通道 / 通道报错 / 内容生成失败）。
+    # 只有 status 的 failed 是没法给用户交代的：既不知道发生了什么，也不知道要不要修。
+    last_error: str | None = Field(default=None, sa_column=Column(Text))
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     )

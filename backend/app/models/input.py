@@ -17,7 +17,7 @@ class RawInput(SQLModel, table=True):
     __table_args__ = (
         CheckConstraint("kind IN ('screenshot', 'text')", name="ck_raw_kind"),
         CheckConstraint(
-            "status IN ('pending', 'processing', 'done', 'failed')",
+            "status IN ('pending', 'processing', 'done', 'failed', 'ignored')",
             name="ck_raw_status",
         ),
         Index("ix_raw_user_status", "user_id", "status"),
