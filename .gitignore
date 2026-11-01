@@ -36,3 +36,5 @@ backup/
 # ---- 日志 ----
 *.log
 logs/
+harness/.env
+harness/node_modules/

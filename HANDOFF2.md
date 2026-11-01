@@ -133,11 +133,32 @@
 
 ### W16 · 接 Harness（已立项，不急着做）
 
-方案在 `docs/16-Harness接入方案.md`，四阶段：A 跑起来 → B 写工具插件 → C 接主服务侧车 → D 灰度。
+方案在 `docs/16-Harness接入方案.md`，四阶段：A 跑起来 → 写工具插件 → C 接主服务侧车 → D 灰度。
+落地记录见 `docs/22-Harness接入记录.md`。
 
-**前置条件**：W13-A 验收通过。**理由**：Harness 调用的就是抽取接口，抽取本身不稳，接上去只是把不准放大。
+**前置条件改了（2026-11-02 用户拍板）**：原写"等 W13-A 验收通过"，用户明确否掉：
+30 张截图只能验"API 能不能识图"，而他要的是 Harness 来管这件事。**先接，接了再测。**
+
+| 阶段 | 状态 |
+|---|---|
+| C 主服务侧 5 个只读接口 + service token | ✅ 已完成，7 条用例覆盖 |
+| B 工具插件（5 个 `defineTool`）+ 侧车文件 | ✅ 代码写完 |
+| A `dsh` 装起来跑通 | ⬜ **被环境挡住**：`sandbox-exec: data object length ... exceeds maximum`，全部 shell 命令失效，`npm install` 没跑完 |
+| D 前端"助理"入口 | ⬜ 等 A/B 通了再上，否则是个点进去 404 的按钮 |
+
+**恢复后三步**（顺序别换，详见 `docs/22` 第五节）：
+
+```bash
+cd harness && npm install --no-audit --no-fund   # 约 600 包 / 100MB+
+cd /Users/xamic/Customers_System && ./dev.sh      # 让 ASSISTANT_TOKEN 生效
+cd harness && ./run.sh                            # 开 http://127.0.0.1:3080
+```
+
+唯一不确定的地方：`cordis.patch.yml` 里 `- name: ./keeper-tools/index.js` 那一行是照
+`docs/16` 推的；若 5 个工具都没出现，用 `npx dsh --profile web --dump-default-config` 对照真实格式。
 
 **完成判据**：问"我今天该联系谁"，它自己调接口查了再回；且 Harness 挂了主流程不受影响。
+
 
 ---
 

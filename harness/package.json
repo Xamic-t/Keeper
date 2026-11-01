@@ -1,0 +1,10 @@
+{
+  "name": "keeper-harness",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Keeper 的 Harness 侧车：只读调主服务，不存业务事实",
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.2.1-rc.5"
+  }
+}

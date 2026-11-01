@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     wecom_webhook: str | None = None
     pushplus_token: SecretStr | None = None
 
+    # ---- 助理（DeepSeek Harness 侧车）----
+    # 侧车用这个 token 调只读接口，不传用户密码（ARCHITECTURE 19.7.4）。
+    # 不配的话 /api/assistant/* 整组返回 503 —— 主流程一条都依赖它，所以不影响使用。
+    assistant_token: SecretStr | None = None
+    # token 代表哪个账号的数据。单用户部署就是 owner 账号。
+    assistant_username: str = "Admin"
+
     @property
     def is_dev(self) -> bool:
         """是否开发环境。"""

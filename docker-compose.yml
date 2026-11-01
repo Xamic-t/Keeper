@@ -61,7 +61,34 @@ services:
       - "443:443"
     restart: unless-stopped
 
+  # 助理侧车（可选）：`docker compose --profile assistant up -d harness`
+  #
+  # 默认不启动 —— 它不是主流程的一部分，删了也不影响投喂/提醒/待办（ARCHITECTURE 19.7.4）。
+  # 只读：容器里没有任何数据库凭据，只能通过下面的 KEEPER_API 走 /api/assistant/*。
+  harness:
+    image: node:22-alpine
+    profiles: ["assistant"]
+    working_dir: /app
+    depends_on:
+      - app
+    volumes:
+      - ./harness:/app
+      - harness_node:/app/node_modules
+    environment:
+      # 容器内用服务名，不是 127.0.0.1
+      KEEPER_API: http://app:8000
+      # 与主服务 .env 里的 ASSISTANT_TOKEN 同一个值（compose 自动读根目录 .env）
+      KEEPER_ASSISTANT_TOKEN: ${ASSISTANT_TOKEN:?助理侧车需要 ASSISTANT_TOKEN}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?助理侧车需要 DEEPSEEK_API_KEY}
+    ports:
+      # 只绑本机：助理界面不该直接暴露到公网
+      - "127.0.0.1:3080:3080"
+    # 如果容器里起不来（绑定地址/端口参数变了），先看 `npx dsh web --help`
+    command: sh -c "npm install --no-audit --no-fund && npx dsh web --patch ./cordis.patch.yml"
+    restart: unless-stopped
+
 volumes:
   pg_data:      # 数据库卷，绝对不能丢
   caddy_data:   # 证书卷
   caddy_config: # Caddy 配置卷
+  harness_node: # 助理侧车的 node_modules（重建容器不用重装 600 个包）

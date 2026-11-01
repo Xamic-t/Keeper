@@ -1,0 +1,14 @@
+{
+  "name": "keeper-tools",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Keeper 的 Harness 工具插件：只读调主服务 5 个接口",
+  "main": "index.js",
+  "dsh": {
+    "bundle": true
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*"
+  }
+}
