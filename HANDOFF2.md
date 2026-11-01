@@ -141,21 +141,21 @@
 
 | 阶段 | 状态 |
 |---|---|
-| C 主服务侧 5 个只读接口 + service token | ✅ 已完成，7 条用例覆盖 |
-| B 工具插件（5 个 `defineTool`）+ 侧车文件 | ✅ 代码写完 |
-| A `dsh` 装起来跑通 | ⬜ **被环境挡住**：`sandbox-exec: data object length ... exceeds maximum`，全部 shell 命令失效，`npm install` 没跑完 |
-| D 前端"助理"入口 | ⬜ 等 A/B 通了再上，否则是个点进去 404 的按钮 |
+| A 跑起来 | ✅ `dsh 0.2.1-rc.5`，618 个包（用 npm，别用 pnpm） |
+| B 工具插件 | ✅ 5 个 `keeper_*` 工具全部被模型认出 |
+| C 主服务侧 5 个只读接口 + service token | ✅ 7 条用例 + 真调用 |
+| D 前端"助理"入口 | ⬜ 先用 dsh 自带 Web UI |
 
-**恢复后三步**（顺序别换，详见 `docs/22` 第五节）：
+**实测（2026-11-02 03:10）**：`dsh headless` 问「我今天该联系谁」，
+它自己调 `keeper_today` / `keeper_facts`，答出了库里真实的 4 个人和各自的细节，
+还如实说"王姐档案是空的"。**不是编的。**
 
 ```bash
-cd harness && npm install --no-audit --no-fund   # 约 600 包 / 100MB+
-cd /Users/xamic/Customers_System && ./dev.sh      # 让 ASSISTANT_TOKEN 生效
-cd harness && ./run.sh                            # 开 http://127.0.0.1:3080
+./dev.sh                 # 主服务要重启，8000 上才是带 /api/assistant 的版本
+cd harness && ./run.sh   # http://127.0.0.1:3080
 ```
 
-唯一不确定的地方：`cordis.patch.yml` 里 `- name: ./keeper-tools/index.js` 那一行是照
-`docs/16` 推的；若 5 个工具都没出现，用 `npx dsh --profile web --dump-default-config` 对照真实格式。
+细节（含两个配置格式坑、怎么自查）见 `docs/22-Harness接入记录.md`。
 
 **完成判据**：问"我今天该联系谁"，它自己调接口查了再回；且 Harness 挂了主流程不受影响。
 

@@ -11,18 +11,18 @@
 
 | 阶段 | 做什么 | 状态 |
 |---|---|---|
-| **A · 跑起来** | `npx @deepseek-ai/dsh web`，配 `DEEPSEEK_API_KEY` | ⬜ **被环境挡住**（见第四节） |
-| **B · 第一个工具** | 写工具插件，`fetch` 调主服务 | ✅ 代码写完（未实跑） |
-| **C · 接主服务** | 5 个只读接口 + service token + 侧车容器 | ✅ 接口已验证（7 条用例） |
-| **D · 前端入口 + 灰度** | 前端加"助理"入口 | ⬜ 没做（等 A/B 通了再上，否则是个点进去 404 的按钮） |
+| **A · 跑起来** | `npx @deepseek-ai/dsh`，配 `DEEPSEEK_API_KEY` | ✅ 已跑（`0.2.1-rc.5`，618 个包） |
+| **B · 工具插件** | 写工具插件，`fetch` 调主服务 | ✅ 已跑，5 个工具都被认出来 |
+| **C · 接主服务** | 5 个只读接口 + service token + 侧车容器 | ✅ 接口 7 条用例 + 真调用通过 |
+| **D · 前端入口 + 灰度** | 前端加"助理"入口 | ⬜ 没做（先用 Web UI，见第四节） |
 
-**卡点只有一个**：`dsh` 装不上 / 起不来（第四节）。主服务这半边是完整可用的。
+**一句话**：后端接口、工具插件、模型调用、真实数据回流，全链路通了。
 
 ---
 
 ## 二、做了什么
 
-### 2.1 主服务：5 个只读接口（已完成并验证）
+### 2.1 主服务：5 个只读接口
 
 按 19.7.8 的清单，新建 `/api/assistant/*`，**不是**复用现成接口：
 
@@ -41,10 +41,10 @@
 3. 助理需要一组**能一眼看出边界**的路径：看到 `/assistant/` 就知道是只读的
 
 **认证**：`X-Assistant-Token` + `ASSISTANT_TOKEN`，常量时间比对。
-不配 → 503（"没启用"），配错 → 401（"token 不对"）。两者分开，不让用户去查错方向。
+不配 → 503（"没启用"），配错 → 401（"token 不对"）。两者分开，不让用户查错方向。
 
 **token 只绕过登录，绕不过 RLS**：解析出 `ASSISTANT_USERNAME` 之后照样
-`session.info["rls_user_id"] = user_id`，和正常请求一条路径。有一条用例专门打这个。
+`session.info["rls_user_id"] = user_id`。有一条用例专门打这个。
 
 **没有写接口**。`test_no_write_endpoints` 断言 POST/PATCH/DELETE 都是 404/405 ——
 写操作要先把"要不要进确认队列"想清楚（19.7.9），在那之前一条都不开。
@@ -54,7 +54,7 @@
 | 文件 | 作用 |
 |---|---|
 | `keeper-tools/index.js` | 插件本体：5 个 `defineTool`，每个 `execute` 里 `fetch` 一个只读接口 |
-| `cordis.patch.yml` | 启动时叠的覆盖层，把插件挂进 web profile |
+| `cordis.patch.yml` | 启动时叠的覆盖层，把插件插进配置树 |
 | `run.sh` | 装依赖 → 凑环境变量 → `npx dsh web --patch ./cordis.patch.yml` |
 | `README.md` | 怎么跑、三条验收、五个常见故障 |
 | `.env` | `KEEPER_API` + `KEEPER_ASSISTANT_TOKEN`（**不进 git**） |
@@ -62,92 +62,116 @@
 `docker-compose.yml` 加了 `harness` 服务，`profiles: ["assistant"]` ——
 **默认不启动**，要跑才 `docker compose --profile assistant up -d harness`。
 
-**为什么用 `--patch` 而不是 `dsh plugin add`**：`plugin add` 要把插件打成 npm 包装进 profile，
-dsh 一升级就容易跟着坏；`--patch` 只是启动时叠一层，删掉文件就回到原样。侧车随时可拆，这是前提。
-
-### 2.3 工具的关键设计（19.7.5 的落地）
-
-每个工具的 `description` 里都写死了"必须先查"：
-
-> `keeper_facts`：回答"她喜欢什么""有什么要注意的"**必须调它，不许凭记忆答**
-
-并且 `execute` 每次都真的打 HTTP，**没有任何缓存**。业务事实只有 Postgres 一份。
+**为什么用 `--patch` 而不是 `dsh plugin add`**：`plugin add` 要把插件打成 npm 包装进
+`~/.dsh/profiles/web`，dsh 一升级就容易跟着坏；`--patch` 只是启动时叠一层，删掉文件就回到原样。
 
 ---
 
-## 三、已验证的部分
+## 三、踩到的两个坑（都是配置格式，不是代码）
 
-```bash
-cd backend && uv run pytest tests/api/test_assistant.py -q   # 7 passed
-cd backend && uv run ruff check --no-cache .                  # All checks passed
+### 坑 1：patch 条目必须有 `id`……但**新增**的条目不能带
+
+```
+patch: id is required for non-insert patches     ← 只写 name 时
+patch: entry "keeper-tools" not found            ← 加了 id 之后
 ```
 
-| 用例 | 钉住什么 |
+两个报错看着像自相矛盾，其实说的是：
+
+- **改/删已有条目** → 顶层要 `id` 指明改谁
+- **新增条目** → 走 `insert` 列表，不写顶层 `id`
+
+正确答案（最终采用）：
+
+```yaml
+- insert:
+    - id: keeper-tools
+      name: ./keeper-tools/index.js
+```
+
+依据不是我猜的，是 `~/.dsh/profiles/web/cordis.patch.yml` 里那句原话：
+
+> a top-level YAML array of loader patch entries
+> (id-targeted config overrides, disables, **and insert lists**; `!!js` expressions allowed)
+
+**自查命令**（不用起服务、不花模型额度）：
+
+```bash
+npx dsh --profile web --patch ./cordis.patch.yml --dump-config | grep keeper
+# 期望：- id: keeper-tools
+#       name: file:///.../harness/keeper-tools/index.js
+```
+
+### 坑 2：`pnpm` 装不上，`npm` 能装
+
+| 包管理器 | 结果 |
 |---|---|
-| `test_unconfigured_returns_503` | 没配 token 是"没启用"，不是"密码错" |
-| `test_wrong_token_returns_401` | 错 token 和不带 token 都是 401 |
-| `test_today_works_with_token` | token 对了能拿到今日数据 |
-| `test_persons_only_returns_token_owner_data` | **token 绕不过 RLS**：别人的人一条都不出现 |
-| `test_facts_only_confirmed` | 只回已确认事实 |
-| `test_no_write_endpoints` | 只有 GET |
-| `test_create_user_role_helper_still_works` | 顺手确认测试夹具没被改坏 |
+| `pnpm add` | 下完 568 个包后被沙箱拒绝写 pnpm 全局 store（`Operation not permitted`），且 pnpm 12 有 `ERR_PNPM_IGNORED_BUILDS` 交互闸门 |
+| `npm install` | ✅ 成功：`added 618 packages in 13m` |
+
+另外：装之前如果 `harness/node_modules` 里有上次失败留下的半成品，`npm` 会因为
+**无权 unlink** 而失败（`CODEBUDDY_BROKER_DENY`）。必须先删干净再装。
+删 `node_modules` 会触发"批量删除确认"，需要在交互终端里执行。
 
 ---
 
-## 四、没验证的部分（**如实说**）
+## 四、实跑结果（2026-11-02 03:10）
 
-**`dsh` 本体没装上，也没跑起来。** 原因是工具链环境故障，不是代码问题：
+用 `dsh headless` 跑，不依赖浏览器：
 
+```bash
+cd harness
+set -a && . ./.env && set +a
+export KEEPER_API=http://127.0.0.1:8001     # 带 /api/assistant 的那份后端
+export DEEPSEEK_API_KEY=…                   # 从 backend settings 取，不落盘
+npx dsh headless --patch ./cordis.patch.yml "…"
 ```
-sandbox-exec: data object length 67234 exceeds maximum (65535)
+
+**验证 1 · 工具是否加载**
+
+> 问：「你现在有哪些 keeper 开头的工具？只列工具名，不要解释」
+>
+> 答：`keeper_facts` / `keeper_find_person` / `keeper_ledger` / `keeper_person` / `keeper_today`
+
+5 个全中 → 插件确实挂进了运行时，不是只写进 YAML。
+
+**验证 2 · 是否真的去查库（关键的一条）**
+
+> 问：「我今天该联系谁？该做什么？」
+>
+> 答（节选）：
+> 今天没有已排定必须联系的人……今天清单 4 条待办，其中"回访"没指定人。
+> **该联系谁**：小赵（最推荐）— 最近睡得晚、有失眠，喜欢听恋爱文……
+> 孟雅楠 — 最近才开始特别喜欢喝苹果汁……小包老师 — 健身、体重这话题要避开……
+> 王姐 — 档案是空的。
+> 另外 **1 条新事实处于待确认状态**。
+
+回答里的 4 个人、每个人的具体事实、"待确认 1 条"**全部来自数据库**，模型编不出这些。
+这就是 19.7.5 要的效果：模型负责组织语言，事实永远从 Postgres 读。
+
+**顺带验到一件事**：它把"王姐档案是空的"也如实说了，没有硬凑 —— 符合业务三原则第 3 条。
+
+---
+
+## 五、还要做什么
+
+### 想用 Web UI 的话（一条命令）
+
+```bash
+cd /Users/xamic/Customers_System && ./dev.sh      # 让 8000 上的后端带上 /api/assistant
+cd harness && ./run.sh                            # 开 http://127.0.0.1:3080
 ```
 
-这个错误从开始装 `npm install` 之后出现，之后**所有 shell 命令**（`echo` 也算）都返回它，
-连 `dangerouslyDisableSandbox` 也一样。也就是说这台机器上的命令执行通道被卡死了，
-装包、起服务、跑测试都做不了（后端那 7 条用例是在故障**之前**跑的）。
+`run.sh` 里 `KEEPER_API` 默认指 8000，所以**主服务必须先重启**——现在 8000 上跑的还是
+加助理接口之前的进程。
 
-已经确认走过的路：
+### 没做的
 
-| 尝试 | 结果 |
+| 项 | 说明 |
 |---|---|
-| `pnpm add @deepseek-ai/dsh` | 下载 568 个包后被沙箱拒绝写 pnpm 全局 store（`Operation not permitted`），且 pnpm 12 的 `ERR_PNPM_IGNORED_BUILDS` 闸门要交互批准 |
-| `npm install`（换 npm 绕开 store 问题） | 跑到 6 分 37 秒，命令通道整体失效，被强行终止；`node_modules` 没落地 |
-
-**所以现在的状态**：主服务侧的接口是**真的可用且被测试覆盖**的；
-侧车侧的代码是**按官方类型定义写的、但没跑过一次**。
-
----
-
-## 五、恢复后要做的三步（顺序别换）
-
-```bash
-# 1) 装（约 600 个包 / 100MB+，第一次慢）
-cd /Users/xamic/Customers_System/harness && npm install --no-audit --no-fund
-
-# 2) 主服务重启（让新加的 ASSISTANT_TOKEN 生效；8000 上的旧进程没有 /api/assistant 路由）
-cd .. && ./dev.sh
-
-# 3) 起侧车
-cd harness && ./run.sh        # 然后打开 http://127.0.0.1:3080
-```
-
-**第 4 步（唯一不确定的地方）**：`cordis.patch.yml` 里那一行 `- name: ./keeper-tools/index.js`
-是照 `docs/16` 的 bundle 写法推的。如果起来后**5 个工具一个都不出现**，说明 dsh 这一版的
-patch 格式不同，用这条命令对照真实结构再改：
-
-```bash
-npx dsh --profile web --dump-default-config
-```
-
-三条验收（在 Web UI 里问）：
-
-| # | 问 | 期望 |
-|---|---|---|
-| 1 | 「你今天能查什么」 | 列出 5 个 `keeper_*` 工具 |
-| 2 | 「我今天该联系谁」 | **界面上看到工具调用**，再按返回的任务回答 |
-| 3 | 「孟雅楠喜欢喝什么」 | 先 find 再 facts，答案带依据 |
-
-第 2 条的关键是"**看到工具调用**"——没调就是插件没加载，不是模型笨。
+| W16-D 前端「助理」入口 | 现在只有 dsh 自带的 Web UI。要进主站前端，等用了几天再定放哪儿 |
+| 会话持久化 / persona 调优 | 用的是 web profile 默认配置，没写 persona。prompt/context engineering 的空间在这儿 |
+| 容器的实跑 | compose 里的 `harness` 服务没 build 过（只在宿主机跑通了） |
 
 ---
 

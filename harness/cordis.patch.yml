@@ -1,11 +1,14 @@
 # Keeper 的 Harness 覆盖层：把只读工具插件挂进 web profile。
 #
-# 用它的方式（不装任何东西，随时可拆）：
+# 用法（不装任何东西，随时可拆）：
 #   ./run.sh                       # 内部就是 npx dsh web --patch ./cordis.patch.yml
 #
-# 为什么不走 `dsh plugin add`：那条路要把插件打成 npm 包再装进 profile，
-# 升级 dsh 时容易跟着坏；--patch 只是启动时叠一层，删了这个文件就回到原样。
+# 格式依据 `~/.dsh/profiles/web/cordis.patch.yml` 的原话：
+#   "a top-level YAML array of loader patch entries
+#    (id-targeted config overrides, disables, and insert lists)"
+# 所以「新增一个插件」走 insert 列表；只有改已有条目才需要顶层 id。
 #
-# 如果 dsh 升级后这一行报"找不到插件"，用下面这条命令对照真实格式：
-#   npx dsh --profile web --dump-default-config
-- name: ./keeper-tools/index.js
+# 自查：npx dsh --profile web --patch ./cordis.patch.yml --dump-config | grep keeper
+- insert:
+    - id: keeper-tools
+      name: ./keeper-tools/index.js
