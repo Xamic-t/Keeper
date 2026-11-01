@@ -30,6 +30,15 @@ EVENT_TYPES = {"birthday", "festival", "payment_due", "custom"}
 MAX_ITEMS = 500
 
 
+def default_rrule(event_type: str) -> str | None:
+    """按事件类型给一个默认重复规则。
+
+    目前只有生日是天然的"每年一次"。其它类型（结款、自定义）默认不重复，
+    让用户自己设 —— 猜错了会凭空多出一堆事件，比没有更烦人。
+    """
+    return "FREQ=YEARLY" if event_type == "birthday" else None
+
+
 @dataclass(frozen=True, slots=True)
 class CalendarItem:
     """日历上的一格。前端按 date 分组渲染。"""
@@ -88,9 +97,11 @@ async def expand_events(session: AsyncSession, start: date, end: date) -> list[C
                     )
                 )
 
-    # 已经有一条农历生日事件的人，别再靠关系表重复生成
-    covered = {event.person_id for event in events if event.type == "birthday" and event.lunar}
-    # 只查一次关系表，批量判断谁家生日是农历补充进私人日历
+    # 已经有生日事件的人，别再靠关系表重复生成（不分农历/公历，否则同一天两条）
+    covered = {
+        event.person_id for event in events if event.type == "birthday" and event.person_id
+    }
+    # 关系表里存了生日、但用户没手动建事件的，补进私人日历
     items.extend(await _relationship_birthdays(session, start, end, covered))
 
     for item in festival_service.get_festivals(start.year):
@@ -134,39 +145,64 @@ def _expand_lunar_birthday(event: Event, start: date, end: date) -> list[Calenda
 async def _relationship_birthdays(
     session: AsyncSession, start: date, end: date, covered: set[int] | None = None
 ) -> list[CalendarItem]:
-    """关系里存了农历生日、但用户没手动建事件时，也要出现在日历上。"""
+    """关系里存了生日、但用户没手动建事件时，也要出现在日历上。
+
+    公历和农历都算：以前只认农历，导致"抽到了公历生日"的人在日历上根本看不到，
+    要等用户自己新建一条事件才出现 —— 而用户不会知道要做这件事。
+    """
     covered = covered or set()
     stmt = (
         select(Relationship, Person.nickname)
         .join(Person, Person.id == Relationship.person_id)
-        .where(Relationship.birthday_lunar.is_not(None))
+        .where(
+            (Relationship.birthday_solar.is_not(None))
+            | (Relationship.birthday_lunar.is_not(None))
+        )
     )
     rows = (await session.execute(stmt)).all()
 
     items: list[CalendarItem] = []
     for relationship, nickname in rows:
         if relationship.person_id in covered:
-            # 这个人已经有一条农历生日事件，别重复生成
             continue
-        lunar = relationship.birthday_lunar or {}
-        month = int(lunar.get("month") or 0)
-        day = int(lunar.get("day") or 0)
-        if not month or not day:
-            continue
-        for year in range(start.year, end.year + 1):
-            converted = festival_service.lunar_to_solar(
-                month, day, bool(lunar.get("is_leap", False)), year
-            )
-            if converted is not None and start <= converted <= end:
-                items.append(
-                    CalendarItem(
-                        day=converted,
-                        title=f"{nickname}生日（农历）",
-                        type="birthday",
-                        person_id=relationship.person_id,
-                        lunar=True,
+
+        days: set[date] = set()
+
+        # 公历：每年同月同日。2 月 29 日在平年退化成 2 月 28 日
+        # （很多日历都这么做；跳过不显示更糟 —— 用户会以为漏了）
+        if relationship.birthday_solar and relationship.birthday_type != "lunar":
+            solar = relationship.birthday_solar
+            for year in range(start.year, end.year + 1):
+                try:
+                    candidate = solar.replace(year=year)
+                except ValueError:
+                    candidate = date(year, 2, 28)
+                if start <= candidate <= end:
+                    days.add(candidate)
+
+        # 农历：每年换算一次
+        lunar = relationship.birthday_lunar
+        if lunar and relationship.birthday_type != "solar":
+            month = int(lunar.get("month") or 0)
+            day = int(lunar.get("day") or 0)
+            if month and day:
+                for year in range(start.year, end.year + 1):
+                    converted = festival_service.lunar_to_solar(
+                        month, day, bool(lunar.get("is_leap", False)), year
                     )
+                    if converted is not None and start <= converted <= end:
+                        days.add(converted)
+
+        for day in sorted(days):
+            items.append(
+                CalendarItem(
+                    day=day,
+                    title=f"{nickname}生日",
+                    type="birthday",
+                    person_id=relationship.person_id,
+                    lunar=bool(relationship.birthday_lunar),
                 )
+            )
     return items
 
 
@@ -206,7 +242,8 @@ async def create_event(
         type=type,
         title=title,
         occurs_on=occurs_on,
-        rrule=rrule,
+        # 没显式给规则时按类型取默认值：生日一年一次，其余不重复
+        rrule=rrule if rrule is not None else default_rrule(type),
         lunar=lunar,
         source_type="manual",
     )

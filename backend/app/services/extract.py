@@ -32,6 +32,7 @@ from app.models.log import ExtractionLog
 from app.models.person import Person
 from app.models.relationship import Relationship
 from app.services import storage
+from app.services.event import default_rrule
 from app.services.vision import vision
 
 logger = logging.getLogger(__name__)
@@ -362,6 +363,10 @@ async def persist_candidates(
                 type=event.type,
                 title=event.title,
                 occurs_on=event.occurs_on,
+                # 生日是每年都要过的，不是只过今年。
+                # 不写 rrule 的话，今年这条过期之后，明年日历和提醒同时消失，
+                # 而用户以为系统记住了。
+                rrule=default_rrule(event.type),
                 lunar=event.lunar,
                 source_type="screenshot",
                 source_id=raw_input_id,
