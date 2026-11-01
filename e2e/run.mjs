@@ -49,12 +49,16 @@ async function runCase(browser, testCase) {
   const started = Date.now()
   const artifacts = []
 
+  // 有些用例故意制造报错（比如验 401 跳转时浏览器必然打一条 401 资源错误）。
+  // 这类白名单只允许精确匹配，不给「随便忽略」的口子。
+  const allowed = (testCase.allowConsoleErrors ?? []).map((p) => new RegExp(p))
+
   try {
     await login(page)
     await testCase.run({ page, config, shot: (name) => shot(page, `${testCase.name}-${name}`) })
-    // 空指针、未捕获的 promise 这类错误会以 console error 形式出现，不能放过
-    if (errors.length) {
-      throw new Error(`页面有 ${errors.length} 条报错：\n${errors.slice(0, 5).join('\n')}`)
+    const unexpected = errors.filter((line) => !allowed.some((re) => re.test(line)))
+    if (unexpected.length) {
+      throw new Error(`页面有 ${unexpected.length} 条报错：\n${unexpected.slice(0, 5).join('\n')}`)
     }
     return { name: testCase.name, ok: true, ms: Date.now() - started, artifacts }
   } catch (err) {

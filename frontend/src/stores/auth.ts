@@ -20,11 +20,18 @@ export const useAuthStore = defineStore('auth', () => {
     return data.user
   }
 
+  /** 清本地登录态。401 时由 client 的回调调用，logout 也走这里。 */
+  function reset() {
+    user.value = null
+    // checked 保持 true：会话确实无效，没必要再拿 /auth/me 试一次
+    checked.value = true
+  }
+
   async function logout() {
     try {
       await api.post('/auth/logout')
     } finally {
-      user.value = null
+      reset()
     }
   }
 
@@ -42,5 +49,5 @@ export const useAuthStore = defineStore('auth', () => {
     return user.value
   }
 
-  return { user, checked, login, logout, ensureSession }
+  return { user, checked, login, logout, ensureSession, reset }
 })

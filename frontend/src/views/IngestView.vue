@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
@@ -11,6 +11,48 @@ const items = ref<RawInputOut[]>([])
 const text = ref('')
 const uploading = ref(false)
 const message = ref('')
+
+// 轮询：识别是后台跑的，界面不主动问就永远停在「识别中…」。
+// 上限 20 次 × 1.5s ≈ 30 秒：够跑完一张图，也不会因为接口异常一直打。
+const POLL_INTERVAL_MS = 1500
+const POLL_MAX_ROUNDS = 20
+let pollTimer: number | null = null
+
+function stopPolling() {
+  if (pollTimer !== null) {
+    window.clearTimeout(pollTimer)
+    pollTimer = null
+  }
+}
+
+function isBusy(item: RawInputOut) {
+  return item.status === 'pending' || item.status === 'processing'
+}
+
+/** 有在处理的就定期重拉列表；全部落定就停。 */
+function startPolling() {
+  stopPolling()
+  let rounds = 0
+
+  const tick = async () => {
+    rounds += 1
+    try {
+      await load()
+    } catch {
+      // 取列表失败（掉线/401 已由 client 处理）就停下，不要越攒越多请求
+      stopPolling()
+      return
+    }
+    if (!items.value.some(isBusy)) return
+    if (rounds >= POLL_MAX_ROUNDS) {
+      message.value = '还在识别，等一会儿刷新就能看到结果'
+      return
+    }
+    pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS)
+  }
+
+  pollTimer = window.setTimeout(tick, POLL_INTERVAL_MS)
+}
 
 async function load() {
   items.value = await api.get<RawInputOut[]>('/raw-inputs', { limit: 20 })
@@ -33,6 +75,7 @@ async function uploadImages(event: Event) {
     message.value = `已接收 ${result.queued} 张，正在后台识别…`
     input.value = ''
     await load()
+    startPolling()
   } catch (err) {
     message.value = err instanceof Error ? err.message : '上传失败'
   } finally {
@@ -42,10 +85,15 @@ async function uploadImages(event: Event) {
 
 async function sendText() {
   if (!text.value.trim()) return
-  await api.post('/ingest/text', { text: text.value.trim() })
-  text.value = ''
-  message.value = '已提交，正在后台识别…'
-  await load()
+  try {
+    await api.post('/ingest/text', { text: text.value.trim() })
+    text.value = ''
+    message.value = '已提交，正在后台识别…'
+    await load()
+    startPolling()
+  } catch (err) {
+    message.value = err instanceof Error ? err.message : '提交失败'
+  }
 }
 
 /** 有原始文件名就显示名字，老数据没存名字的退化成时间 */
@@ -79,7 +127,18 @@ function thumbUrl(item: RawInputOut) {
   return item.kind === 'screenshot' ? `/api/raw-inputs/${item.id}/file` : ''
 }
 
-onMounted(load)
+onMounted(async () => {
+  try {
+    await load()
+  } catch (err) {
+    message.value = err instanceof Error ? err.message : '列表没取到'
+    return
+  }
+  // 进页面时如果有上次没跑完的，接着盯
+  if (items.value.some(isBusy)) startPolling()
+})
+
+onUnmounted(stopPolling)
 </script>
 
 <template>

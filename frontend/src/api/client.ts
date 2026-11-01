@@ -33,6 +33,24 @@ export interface Envelope<T> {
   meta?: Record<string, unknown>
 }
 
+/**
+ * 401 的出口。
+ *
+ * 不在这个文件里直接 import store 或 router：client 是最底层，
+ * 反过来依赖上层会造成循环引用（router → views → api → router）。
+ * 由 main.ts 在启动时注册一个回调，这里只负责"喊一声"。
+ */
+let unauthorizedHandler: (() => void) | null = null
+
+export function onUnauthorized(handler: () => void): void {
+  unauthorizedHandler = handler
+}
+
+/** 已经在登录页就不要再跳了，否则会把用户想看的提示顶掉。 */
+function onLoginPage(): boolean {
+  return window.location.pathname.startsWith('/login')
+}
+
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp(`(^|;\\s*)${name}=([^;]*)`))
   return match ? decodeURIComponent(match[2]) : null
@@ -91,6 +109,12 @@ async function request<T>(
 
   const payload = await response.json()
   if (!response.ok) {
+    // 会话过期：清态并回登录页。以前注释写了"401 一律跳登录页"，
+    // 但代码里从来没实现过 —— 结果 cookie 过期后每个页面都是空列表，
+    // 用户以为数据丢了。
+    if (response.status === 401 && !onLoginPage()) {
+      unauthorizedHandler?.()
+    }
     const error = (payload?.error ?? { code: 'HTTP_ERROR', message: '请求失败' }) as ApiErrorShape
     throw new ApiError(response.status, error)
   }
