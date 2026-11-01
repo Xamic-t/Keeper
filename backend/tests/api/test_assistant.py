@@ -62,7 +62,7 @@ async def test_wrong_token_returns_401(
 async def test_today_works_with_token(
     client: httpx.AsyncClient, assistant_as: Account
 ) -> None:
-    person_id = await _person(assistant_as, "孟雅楠")
+    await _person(assistant_as, "孟雅楠")
 
     response = await client.get(
         "/api/assistant/today", headers={"X-Assistant-Token": TOKEN}

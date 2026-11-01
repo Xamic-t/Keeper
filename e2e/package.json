@@ -1,0 +1,15 @@
+{
+  "name": "keeper-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "端到端验收：真浏览器点真页面，只跑隔离账号",
+  "scripts": {
+    "list": "node run.mjs --list",
+    "smoke": "node run.mjs --smoke",
+    "test": "node run.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.64.1"
+  }
+}

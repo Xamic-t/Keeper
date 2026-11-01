@@ -38,3 +38,9 @@ backup/
 logs/
 harness/.env
 harness/node_modules/
+
+# ---- e2e 验收 ----
+e2e/node_modules/
+e2e/artifacts/
+e2e/last-summary.json
+.env.e2e
