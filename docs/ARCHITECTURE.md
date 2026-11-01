@@ -243,6 +243,42 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 
 **明确不用**：Redis、Celery、Django、Flask、Nginx、Kubernetes、GraphQL。
 
+#### 7.6.1 前端依赖（Vue 侧）
+
+前端不是"零依赖"，但**每个包都必须能回答"不用它会具体损失什么"**（19.1）。
+
+| 能力 | 库 | 版本 | 用在哪 | 不用会损失什么 |
+|---|---|---|---|---|
+| 框架 | `vue` | 3.5.x | 全部页面 | — |
+| 状态 | `pinia` | 2.x | 登录态（`stores/auth.ts`）、日历数据（`stores/calendar.ts`） | 跨视图共享状态要靠 prop 层层传 |
+| 路由 | `vue-router` | 4.x | 九个页面 + 底部 tab | 手写 hash 路由 |
+| 样式 | `tailwindcss` + `@tailwindcss/vite` | 4.x | 全部 | 手写 CSS，且 token 无法集中管理 |
+| 构建 | `vite` | 6.x | dev server / 打包 | — |
+| 类型 | `vue-tsc`、`openapi-typescript` | 2.x / 7.x | 类型检查、从 `/openapi.json` 生成类型 | 前后端字段漂移只能运行时发现 |
+
+**唯一的"大件"依赖：日历网格**
+
+| 项 | 内容 |
+|---|---|
+| 包 | `@fullcalendar/core` · `@fullcalendar/vue3` · `@fullcalendar/daygrid` · `@fullcalendar/interaction` |
+| 版本 | **钉死 6.x**（四个包必须同版本）。npm 上 `latest` 已是 7.x，**不写版本号会装错** |
+| 用途 | 日历页的月网格、翻月、同日多条目折叠，以及**把待办拖到另一天**（`interaction` 提供 `eventDrop`） |
+| 授权 | MIT 核心版够用。付费 Premium 只有 resource timeline 那类，本项目不涉及 |
+| 为什么不用更轻的 | `vue-cal` 更轻，但月网格拖拽手感要自己调；**手搓网格**正是 §10.1「自己写不出来」那一类，不碰 |
+| 为什么不用 Schedule-X | 它的拖拽已划到付费插件 `@sx-premium/drag-and-drop`，而拖拽正是核心需求 |
+| 为什么是 6 不是 7 | ① v7 自带整套主题体系（`skeleton.css` + `theme.css` + `palettes/*`），和本项目手写的暖米色 token 是两套设计语言；**v6 只改变量** ② v7 需额外装 `temporal-polyfill` ③ 6.x 是最主流写法，语料最多 |
+
+**落地约束（违反会越写越脏）**：
+
+1. FullCalendar 自己生成 DOM，**Tailwind class 加不进去**。改外观只有两条路：CSS 变量（`--fc-*`）、或 `eventContent` 插槽。**不许用 `!important` 去压 `.fc-*`**
+2. 拖拽只对**可写条目**开放（`event_id != null` 的自定义事件 + 待办）。节日、节气、关系表派生的农历生日是算出来的，`editable: false`
+3. 合并事件时 **id 必须带前缀**（`todo-12` / `event-7`）。两张表的自增 id 都是小整数，混用必撞车，撞了后果是拖 A 改了 B
+4. 翻月数据源是 `datesSet` → `view.activeStart/activeEnd`，**不要在 `onMounted` 死拉当月**，否则用户翻月就是空白
+
+详细交接见 [`18-日历页接入交接.md`](./18-日历页接入交接.md)。
+
+**前端明确不用**：任何 UI 组件库（Element Plus / Naive UI / Vuetify）、`htmx`+服务端渲染、图表库、`axios`（`fetch` 够用）。
+
 ---
 
 ## 8. Python 语言工程规范
@@ -950,6 +986,7 @@ async def get_person(pid: int, session: Session = Depends(get_session)):
 | **Docker Compose** | ⚠️ 偏重 | 单机项目可以 systemd 跑 | 保留（环境一致 + 迁移方便） |
 | **Caddy** | ❌ 不过度 | 配置量是 Nginx 的 1/10 | 保留 |
 | **Vue 3 + TypeScript** | ❌ 不过度 | 产品负责人指定；学习成本靠类型生成抵消 | 保留 |
+| **FullCalendar 6.x** | ⚠️ 体积偏大（约 250KB gzip） | 但它是唯一"不写就做不完"的前端库：月网格 + 拖拽 + 翻月。§10.1 已明确这块自己写不出来 | 保留，见 7.6.1 |
 
 ### 19.3 三处可以减负（建议）
 
