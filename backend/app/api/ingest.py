@@ -215,6 +215,35 @@ async def get_raw_input_file(
 
 
 @router.post(
+    "/raw-inputs/{raw_input_id}/dismiss",
+    response_model=DataResponse[RawInputOut],
+    summary="忽略这条材料",
+    dependencies=[Depends(require_csrf)],
+)
+async def dismiss_raw_input(
+    raw_input_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """标成 ignored，并把这条材料下待确认的事实一起驳回。
+
+    用于"归属待定、我也不想管它"的材料：以前没有任何办法让它从列表里消失。
+    """
+    raw_input = await ingest_service.dismiss(session, raw_input_id)
+    return ok(
+        RawInputOut(
+            id=raw_input.id or 0,
+            kind=raw_input.kind,
+            status=raw_input.status,
+            person_id=raw_input.person_id,
+            original_filename=raw_input.original_filename,
+            error_msg=raw_input.error_msg,
+            created_at=raw_input.created_at,
+            processed_at=raw_input.processed_at,
+        )
+    )
+
+
+@router.post(
     "/raw-inputs/{raw_input_id}/assign",
     response_model=DataResponse[RawInputOut],
     status_code=status.HTTP_202_ACCEPTED,

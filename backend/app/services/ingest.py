@@ -15,6 +15,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, ErrorCode
+from app.models.fact import Fact
 from app.models.input import ChatSegment, RawInput
 from app.models.person import Person
 from app.services import extract, storage
@@ -168,6 +169,33 @@ async def assign_person(
         update(ChatSegment)
         .where(ChatSegment.raw_input_id == raw_input_id)
         .values(person_id=person_id)
+    )
+    await session.commit()
+    return raw_input
+
+
+async def dismiss(session: AsyncSession, raw_input_id: int) -> RawInput:
+    """把一条材料标成"忽略"。归属待定的材料以前只能干看着，没有任何处置手段。
+
+    顺手把它下面的待确认事实一起驳回：用户的意思是"这条材料别管了"，
+    留着几条没有归属的待确认事实只会一直堵在确认页。
+    """
+    raw_input = await get_raw_input(session, raw_input_id)
+    if raw_input.status == "ignored":
+        return raw_input
+
+    raw_input.status = "ignored"
+    raw_input.error_msg = None
+    session.add(raw_input)
+
+    await session.execute(
+        update(Fact)
+        .where(
+            Fact.source_type == "screenshot",
+            Fact.source_id == raw_input_id,
+            Fact.status == "pending",
+        )
+        .values(status="rejected")
     )
     await session.commit()
     return raw_input

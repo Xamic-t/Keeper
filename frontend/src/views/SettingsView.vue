@@ -89,6 +89,37 @@ async function signOut() {
   router.push({ name: 'login' })
 }
 
+// ── 改密码 ──────────────────────────────────────────────
+// 后端 /api/auth/password 一直存在，但前端从没调用过：
+// 改了初始密码这件事只能靠命令行去做。
+const passwordForm = ref({ old: '', next: '', again: '' })
+const changingPassword = ref(false)
+
+async function changePassword() {
+  message.value = ''
+  if (passwordForm.value.next.length < 8) {
+    error.value = '新密码至少 8 位'
+    return
+  }
+  if (passwordForm.value.next !== passwordForm.value.again) {
+    error.value = '两次输入的新密码不一致'
+    return
+  }
+  changingPassword.value = true
+  const done = await guard(
+    () =>
+      api.post('/auth/password', {
+        old_password: passwordForm.value.old,
+        new_password: passwordForm.value.next,
+      }),
+    '密码没改成',
+  )
+  changingPassword.value = false
+  if (done === null) return
+  passwordForm.value = { old: '', next: '', again: '' }
+  message.value = '密码已修改，下次登录用新密码'
+}
+
 onMounted(load)
 </script>
 
@@ -104,7 +135,9 @@ onMounted(load)
       <label class="flex items-center justify-between">
         <span>
           <span class="block text-sm font-medium">保留聊天原图</span>
-          <span class="block text-xs text-ink-soft">关掉后，抽取完就把图片删掉，只留文字</span>
+          <span class="block text-xs text-ink-soft">
+            关掉后，识别完就把图片从磁盘删掉，只留文字（已经打开的缩略图会失效）
+          </span>
         </span>
         <input
           type="checkbox"
@@ -173,6 +206,36 @@ onMounted(load)
         企微：群设置 → 群机器人 → 添加 → 复制 webhook。PushPlus：微信登录 pushplus.plus → 一对一推送 → 复制 token。
       </p>
       <p v-if="message" class="mt-2 text-xs text-accent-deep">{{ message }}</p>
+    </section>
+
+    <section class="card mb-4 p-4">
+      <h2 class="mb-2 text-sm font-medium">改密码</h2>
+      <form class="space-y-2" @submit.prevent="changePassword">
+        <input
+          v-model="passwordForm.old"
+          type="password"
+          class="input"
+          placeholder="当前密码"
+          autocomplete="current-password"
+        />
+        <input
+          v-model="passwordForm.next"
+          type="password"
+          class="input"
+          placeholder="新密码（至少 8 位）"
+          autocomplete="new-password"
+        />
+        <input
+          v-model="passwordForm.again"
+          type="password"
+          class="input"
+          placeholder="再输一次新密码"
+          autocomplete="new-password"
+        />
+        <button class="btn btn-ghost w-full" type="submit" :disabled="changingPassword">
+          {{ changingPassword ? '保存中…' : '保存新密码' }}
+        </button>
+      </form>
     </section>
 
     <section class="card mb-4 p-4">

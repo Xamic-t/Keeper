@@ -117,6 +117,7 @@ function formatTime(iso: string) {
 
 /** 只在没完成／出错时才提示状态，正常的不打扰 */
 function statusHint(item: RawInputOut) {
+  if (item.status === 'ignored') return '已忽略'
   if (item.status === 'failed') return item.error_msg || '识别失败'
   if (item.status === 'processing') return '识别中…'
   if (item.status === 'pending') return '排队中…'
@@ -125,6 +126,25 @@ function statusHint(item: RawInputOut) {
 
 function thumbUrl(item: RawInputOut) {
   return item.kind === 'screenshot' ? `/api/raw-inputs/${item.id}/file` : ''
+}
+
+/** 归属待定 / 识别失败的材料可以直接扔掉，不然它会一直挂在列表里。 */
+function canDismiss(item: RawInputOut) {
+  if (item.status === 'ignored') return false
+  if (item.status === 'failed') return true
+  // 识别完成但没认出是谁：留在确认页也没法处理
+  return item.status === 'done' && item.person_id === null
+}
+
+async function dismiss(item: RawInputOut) {
+  if (!confirm('忽略这条材料？它下面待确认的内容会一起驳回。')) return
+  try {
+    await api.post(`/raw-inputs/${item.id}/dismiss`)
+    message.value = '已忽略'
+    await load()
+  } catch (err) {
+    message.value = err instanceof Error ? err.message : '没忽略掉'
+  }
 }
 
 onMounted(async () => {
@@ -222,6 +242,14 @@ onUnmounted(stopPolling)
         >
           原图
         </a>
+
+        <button
+          v-if="canDismiss(item)"
+          class="shrink-0 text-xs text-ink-soft hover:text-danger"
+          @click="dismiss(item)"
+        >
+          忽略
+        </button>
       </li>
     </ul>
   </div>

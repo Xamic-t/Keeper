@@ -31,6 +31,7 @@ from app.models.ledger import Ledger
 from app.models.log import ExtractionLog
 from app.models.person import Person
 from app.models.relationship import Relationship
+from app.models.user import User
 from app.services import storage
 from app.services.event import default_rrule
 from app.services.vision import vision
@@ -478,6 +479,11 @@ async def extract_from_raw_input(
                 len(result.facts),
                 reply.provider,
             )
+
+            # 用户关掉「保留原图」时，识别完就把图删掉，只留文字。
+            # 这个开关以前只存在库里没人读，勾了也没有任何效果 —— 等于对隐私撒谎。
+            # 放在 commit 之后：先保证结果落库，再删原图，删失败也不影响数据。
+            await _drop_image_if_disabled(session, raw_input, user_id)
         except AppError as exc:
             await session.rollback()
             await _mark_failed(session, raw_input_id, user_id, exc.code.value, started)
@@ -487,6 +493,27 @@ async def extract_from_raw_input(
             await _mark_failed(session, raw_input_id, user_id, type(exc).__name__, started)
 
     return result
+
+
+async def _drop_image_if_disabled(
+    session: AsyncSession, raw_input: RawInput, user_id: int
+) -> None:
+    """用户关掉「保留原图」时，识别完把文件删掉。
+
+    只置 file_path=None 不够：磁盘上还留着原图，隐私承诺就是假的。
+    删文件失败不抛 —— 数据已经落库了，因为删不掉图而让整次投喂变失败更糟。
+    """
+    user = await session.get(User, user_id)
+    if user is None or user.keep_original_images:
+        return
+    if not raw_input.file_path:
+        return
+
+    if storage.delete_file(raw_input.file_path, person_id=raw_input.person_id):
+        raw_input.file_path = None
+        raw_input.file_deleted_at = datetime.now(UTC)
+        session.add(raw_input)
+        await session.commit()
 
 
 def _avg_confidence(result: ExtractionResult) -> float:
