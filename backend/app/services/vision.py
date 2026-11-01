@@ -20,6 +20,7 @@ import httpx
 
 from app.config import settings
 from app.core.errors import AppError, ErrorCode
+from app.services.storage import sniff_image_suffix
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +58,16 @@ def _providers() -> list[Provider]:
     return [item for item in (primary, fallback) if item.ready]
 
 
-def _image_part(image: bytes, mime: str = "image/jpeg") -> dict[str, Any]:
-    """把图片塞成 data URL。VLM 都吃这个格式。"""
+def _image_part(image: bytes) -> dict[str, Any]:
+    """把图片塞成 data URL。VLM 都吃这个格式。
+
+    mime 按**字节**判，不看后缀也不写死 jpeg（评审 P2-6）：
+    png 图片标成 image/jpeg，有的服务会直接拒收或按 jpeg 解码出错。
+    """
     encoded = base64.b64encode(image).decode()
+    suffix = sniff_image_suffix(image)
+    # 嗅探不出（比如老数据已经损坏）就退回 jpeg，至少还有一次机会
+    mime = "image/jpeg" if suffix in (None, "jpg") else f"image/{suffix}"
     return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}}
 
 

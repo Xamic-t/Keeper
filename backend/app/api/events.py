@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import local_today
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
 from app.services import event as event_service
@@ -58,7 +59,7 @@ async def list_events(
     to: Annotated[date | None, Query(description="结束日期 YYYY-MM-DD")] = None,
 ) -> dict[str, Any]:
     """返回范围内的事件 + 农历生日 + 节日，按日期排序。空范围返回 200 + 空数组。"""
-    start = from_ or date.today().replace(day=1)
+    start = from_ or local_today().replace(day=1)
     end = to or event_service.month_range(start)[1]
     items = await event_service.list_events(session, start, end)
     return ok(

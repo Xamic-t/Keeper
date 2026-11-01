@@ -11,12 +11,13 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import local_today
 from app.models.event import Event, Reminder
 from app.models.fact import Fact
 from app.models.ledger import Ledger
@@ -206,7 +207,7 @@ async def _recent_block(session: AsyncSession) -> list[dict[str, Any]]:
 
 async def get_today(session: AsyncSession, user_id: int, today: date | None = None) -> TodayView:
     """组装今日页。任何一块失败都不让整页崩，只标 degraded。"""
-    reference = today or datetime.now(UTC).date()
+    reference = today or local_today()
     view = TodayView(date=reference)
 
     try:

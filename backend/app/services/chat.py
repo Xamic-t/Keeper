@@ -15,12 +15,12 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import local_today
 from app.models.event import Event
 from app.models.fact import Fact
 from app.models.input import RawInput
@@ -119,7 +119,7 @@ async def _next_event(session: AsyncSession, person_id: int) -> Event | None:
     """这个人下一个还没过的日子（生日、结款这类），查询时顺嘴提一句。"""
     stmt = (
         select(Event)
-        .where(Event.person_id == person_id, Event.occurs_on >= date.today())
+        .where(Event.person_id == person_id, Event.occurs_on >= local_today())
         .order_by(Event.occurs_on)
         .limit(1)
     )

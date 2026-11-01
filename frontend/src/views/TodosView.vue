@@ -10,31 +10,58 @@ const todos = ref<TodoOut[]>([])
 const loading = ref(true)
 const title = ref('')
 const creating = ref(false)
+/** 出错要说话。以前这里没有 catch，接口一错就是静默白屏（评审 P3-1）。 */
+const error = ref('')
+
+function fail(err: unknown, fallback: string) {
+  error.value = err instanceof Error ? err.message : fallback
+}
 
 async function load() {
   loading.value = true
+  error.value = ''
   try {
     todos.value = await api.get<TodoOut[]>('/todos', { status: 'open' })
+  } catch (err) {
+    fail(err, '待办没取到，刷新试试')
   } finally {
     loading.value = false
   }
 }
 
 async function create() {
-  if (!title.value.trim()) return
-  await api.post('/todos', { title: title.value.trim() })
-  title.value = ''
-  await load()
+  if (!title.value.trim() || creating.value) return
+  creating.value = true
+  error.value = ''
+  try {
+    await api.post('/todos', { title: title.value.trim() })
+    title.value = ''
+    await load()
+  } catch (err) {
+    fail(err, '没加成功')
+  } finally {
+    creating.value = false
+  }
 }
 
 async function toggle(todo: TodoOut) {
-  await api.patch(`/todos/${todo.id}`, { status: 'done' })
-  await load()
+  error.value = ''
+  try {
+    await api.patch(`/todos/${todo.id}`, { status: 'done' })
+    await load()
+  } catch (err) {
+    fail(err, '勾选没保存')
+  }
 }
 
 async function remove(todo: TodoOut) {
-  await api.delete(`/todos/${todo.id}`)
-  await load()
+  error.value = ''
+  try {
+    await api.delete(`/todos/${todo.id}`)
+    await load()
+  } catch (err) {
+    fail(err, '没删掉')
+  }
 }
 
 onMounted(load)
@@ -48,6 +75,10 @@ onMounted(load)
       <input v-model="title" class="input" placeholder="要做什么？" maxlength="200" />
       <button class="btn btn-primary shrink-0" type="submit" :disabled="creating">添加</button>
     </form>
+
+    <p v-if="error" class="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
+      {{ error }}
+    </p>
 
     <div v-if="loading" class="text-sm text-ink-soft">加载中…</div>
 

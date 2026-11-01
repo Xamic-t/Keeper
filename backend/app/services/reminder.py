@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError, ErrorCode
 from app.models.event import Event, Reminder
-from app.models.fact import Fact
+from app.models.fact import Fact, Tag
 from app.models.ledger import Ledger
 from app.models.person import Person
 from app.models.relationship import Relationship
@@ -77,10 +77,10 @@ def _hits(event_type: str, days_left: int) -> bool:
 
 async def _person_context(
     session: AsyncSession, person_id: int
-) -> tuple[Person | None, Relationship | None, list[Fact], list[Ledger]]:
+) -> tuple[Person | None, Relationship | None, list[Fact], list[Ledger], list[Tag]]:
     person = await session.get(Person, person_id)
     if person is None:
-        return None, None, [], []
+        return None, None, [], [], []
     relationship = (
         await session.execute(select(Relationship).where(Relationship.person_id == person_id))
     ).scalar_one_or_none()
@@ -97,7 +97,22 @@ async def _person_context(
         .scalars()
         .all()
     )
-    return person, relationship, facts, ledger
+    # 标签是给模型的"快速画像"，过期的不要（评审 P2-8：这里以前是写死的 []）
+    tags = list(
+        (
+            await session.execute(
+                select(Tag)
+                .where(
+                    Tag.person_id == person_id,
+                    (Tag.expires_at.is_(None)) | (Tag.expires_at > datetime.now(UTC)),
+                )
+                .order_by(Tag.key, Tag.value)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return person, relationship, facts, ledger, tags
 
 
 def _render_prompt(
@@ -109,6 +124,7 @@ def _render_prompt(
     relationship: Relationship | None,
     facts: list[Fact],
     ledger: list[Ledger],
+    tags: list[Tag],
 ) -> str:
     template_path = PROMPTS_DIR / "v1_reminder.md"
     try:
@@ -128,7 +144,7 @@ def _render_prompt(
         "budget_max": str(relationship.gift_budget_max) if relationship else "",
         "taboo": relationship.taboo if relationship else [],
         "summary": person.summary or "",
-        "tags": [],
+        "tags": [{"key": tag.key, "value": tag.value} for tag in tags],
         "memory_facts": [
             {"category": fact.category, "content": fact.content} for fact in facts[:6]
         ],
@@ -170,7 +186,7 @@ async def generate_content(
     session: AsyncSession, event: Event, person_id: int, level: str, days_left: int
 ) -> dict[str, Any]:
     """生成一条完整提醒：事实陈述 + 建议 + 依据 + 话术。"""
-    person, relationship, facts, ledger = await _person_context(session, person_id)
+    person, relationship, facts, ledger, tags = await _person_context(session, person_id)
     if person is None:
         return _degraded_payload(event, days_left)
 
@@ -182,6 +198,7 @@ async def generate_content(
         relationship=relationship,
         facts=facts,
         ledger=ledger,
+        tags=tags,
     )
 
     try:

@@ -109,18 +109,26 @@
 |---|---|---|
 | P2-2 `_clear_previous` 不过滤 status | ✅ 已修 | 只删 `status='pending'` 的事实，已确认的不再被重抽静默删掉；`tests/services/test_extract_clear.py` 钉住 |
 | P2-1 初始密码硬编码进 git | ✅ 已修 | 删掉 `INITIAL_PASSWORD` 常量与默认值，`password` 改为必填；`tests/api/test_admin.py` 验证缺字段被拒 |
+| P2-12 导出 ZIP 文件名可 Zip Slip | ✅ 已修 | `safe_name()` 清洗昵称，只放行文字/数字/下划线/汉字 |
+| P2-6 图片 MIME 永远写 `image/jpeg` | ✅ 已修 | 按字节嗅探真实类型，png/webp 不再标成 jpeg |
+| P2-8 提醒模板 `{tags}` 永远空 | ✅ 已修 | 查 tags 并过滤过期，渲染成 `[{"key","value"}]` |
+| P3-1 前端页面零错误处理 | ✅ 已修（实际只剩两页） | 待办页 / 设置页加 catch + 页内错误条 |
 | P2-4 `ensure_daily_template` 并发重复 | ⬜ 未做 | 要加 `(user_id, source, due_date)` 唯一索引 → 先改 `docs/06` 再加 migration 0006，单独一轮做 |
 
-顺带：`create_user` 测试夹具加了 `role` 参数，方便以后写 owner 权限的用例。
+细节见 `docs/21-剩余清债与业务时区.md`。同一份文档里还记了一条更严重的：
+
+> **T1 · "今天是哪天"按 UTC 算** —— 容器 TZ 是 UTC，北京时间 0–8 点之间今日页会显示昨天的任务、
+> 生日当天的 T-0 提醒会提前一天发。已统一走 `app/core/clock.py` 的 `local_today()`（Asia/Shanghai），
+> 时间戳仍用 UTC。`ARCHITECTURE` 8.6 已加这条规则。
 
 剩下 P2/P3 里还值得做但没动的：
 
 | 条目 | 为什么值得做 |
 |---|---|
-| P2-12 导出 ZIP 文件名可 Zip Slip | 昵称含 `../` 能跳出导出目录，一条 `re.sub` 就修 |
-| P2-6 图片 MIME 永远写 `image/jpeg` | png/webp 也标 jpeg，可能影响模型识别 |
-| P2-8 提醒模板里 `{tags}` 永远渲染成空数组 | 提醒文案少了标签这一维依据 |
-| P3-1 前端所有页面零错误处理 | 出错就是静默白屏，跟 `docs/17` 的 F1 同源 |
+| P2-4 每日模板并发重复 | 加唯一索引更稳，但要动数据库 |
+| P3-2 `limit` 没有上限 | `api/persons.py` 可传 `limit=99999` |
+| P3-5 `ratelimit._hits` 只增不减 | IP 多了会慢慢涨 |
+| P3-7 `avatar_path` 只出不进 | 全项目没有写入点，永远为 None |
 
 ---
 
@@ -208,7 +216,7 @@ cd backend && uv run python scripts/test_extraction.py --score ~/testdata/screen
 cd backend && uv run alembic current   # 应为 0005 (head)
 ```
 
-**当前基线**：120 测试通过 · ruff 干净 · vue-tsc 无错 · 迁移 0005
+**当前基线**：129 测试通过 · ruff 干净 · vue-tsc 无错 · 迁移 0005
 
 ---
 
@@ -219,3 +227,4 @@ cd backend && uv run alembic current   # 应为 0005 (head)
 | 2026-11-01 | 首版：W12 完成、W13 进行中的真实状态；重排 W13–W16；补环境坑与产品待定项 |
 | 2026-11-01 | 日历页接入 FullCalendar 6.x（`docs/19`）；新增环境坑：装完依赖必须重启 vite |
 | 2026-11-01 | W13-B 对话式投喂完成（`docs/20`）；W15 清掉 P2-1 / P2-2；基线 106 → 120 |
+| 2026-11-02 | 清 P2-6 / P2-8 / P2-12 / P3-1，修业务时区（`docs/21`）；设置页可配 PushPlus；基线 120 → 129 |

@@ -363,8 +363,17 @@ from app.services.profile import rewrite_summary
 |---|---|
 | **金额用 `Decimal`，不用 `float`** | `Decimal("520.00")` |
 | 金额和数据库类型对齐 | `numeric(12,2)` ↔ `Decimal` |
-| **时间必须带时区** | `datetime.now(timezone.utc)`，不用 `datetime.now()` |
+| **时间戳必须带时区** | `datetime.now(UTC)`，不用 `datetime.now()` |
+| **业务日期用 `local_today()`**，不用 `date.today()` / `datetime.now(UTC).date()` | `from app.core.clock import local_today` |
 | 用 f-string | `f"person {pid}"`，不用 `%` 或 `.format()` |
+
+> **时间戳和业务日期是两件事，分开算。**
+> 存库、记 `sent_at`、日志——用 UTC 时间戳，这条不变。
+> 但"今天是哪天"（今日页、提醒档位 T-7/T-3/T-0、待办模板）必须按**用户所在时区**算。
+> 容器默认 TZ 是 UTC，北京时间 0 点到 8 点之间 `date.today()` 返回的还是昨天：
+> 今日页会显示昨天的任务，生日当天的 T-0 提醒会提前一天发。
+> 产品是单区域（用户都在国内），所以统一 `Asia/Shanghai`，见 `app/core/clock.py`。
+
 
 ### 8.7 路径与文件
 

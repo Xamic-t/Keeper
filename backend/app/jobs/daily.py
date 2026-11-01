@@ -10,10 +10,11 @@
 import argparse
 import asyncio
 import logging
-from datetime import UTC, date, datetime
+from datetime import date
 
 from sqlalchemy import select
 
+from app.core.clock import local_today
 from app.db import SessionLocal
 from app.models.user import User
 from app.services import profile, reminder
@@ -28,7 +29,7 @@ async def run_once(today: date | None = None) -> reminder.ScanResult:
     一个不带 rls_user_id 的 session 查 persons 会直接抛 UndefinedObject。
     users 表没开 RLS，所以先用系统 session 取活跃用户列表。
     """
-    reference = today or datetime.now(UTC).date()
+    reference = today or local_today()
     result = reminder.ScanResult()
 
     # ① users 表没开 RLS，用无变量的系统 session 取活跃用户

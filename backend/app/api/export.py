@@ -10,6 +10,7 @@
 import csv
 import io
 import json
+import re
 import zipfile
 from typing import Annotated, Any
 
@@ -23,6 +24,16 @@ from app.models.person import Person
 from app.services import person as person_service
 
 router = APIRouter(prefix="/export", tags=["export"])
+
+# ZIP 条目名里只允许：文字、数字、下划线、连字符、汉字。其它一律换成下划线。
+# 不这么干，昵称里写 `../../etc/x` 就能在解压时跳出导出目录（Zip Slip，评审 P2-12）。
+_UNSAFE_NAME = re.compile(r"[^\w\u4e00-\u9fff-]")
+
+
+def safe_name(text: str, fallback: str = "person") -> str:
+    """把人名清洗成可以放进 ZIP 路径的片段。纯符号的名字退化成 fallback。"""
+    cleaned = _UNSAFE_NAME.sub("_", text or "").strip("_")
+    return cleaned[:80] or fallback
 
 
 @router.get("", summary="全量导出 ZIP")
@@ -42,7 +53,7 @@ async def export_all(
                 continue
             data = await person_service.export_person(session, person.id)
             archive.writestr(
-                f"persons/{person.id}-{person.nickname}.json",
+                f"persons/{person.id}-{safe_name(person.nickname)}.json",
                 json.dumps(data, ensure_ascii=False, indent=2),
             )
             index.append(
