@@ -123,6 +123,9 @@ export interface TaskItem {
   source_id: number | null
   due: string | null
   priority: number
+  /** 提醒没推出去（没配通道 / 通道失败）：内容在，但用户没收到推送 */
+  unsent?: boolean
+  unsent_reason?: string | null
 }
 
 export interface TodayView {

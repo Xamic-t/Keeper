@@ -25,6 +25,9 @@ class TaskItemOut(BaseModel):
     source_id: int | None = None
     due: date | None = None
     priority: int = 5
+    # 提醒没推出去（没配通道 / 通道失败）时 true，界面标「未发送」并给原因
+    unsent: bool = False
+    unsent_reason: str | None = None
 
 
 class PendingPreviewOut(BaseModel):
@@ -71,6 +74,8 @@ async def get_today(
                     source_id=item.source_id,
                     due=item.due,
                     priority=item.priority,
+                    unsent=item.unsent,
+                    unsent_reason=item.unsent_reason,
                 )
                 for item in view.tasks
             ],

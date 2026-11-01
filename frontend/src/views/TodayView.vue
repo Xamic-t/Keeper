@@ -174,6 +174,14 @@ onMounted(load)
                 >
                   提醒
                 </span>
+                <!-- 没推出去要说清楚：用户没收到手机通知，但事还是得做 -->
+                <span
+                  v-if="task.unsent"
+                  class="rounded bg-danger-soft px-1.5 py-0.5 text-[11px] text-danger"
+                  :title="task.unsent_reason ?? '没有推送出去'"
+                >
+                  未推送
+                </span>
                 <RouterLink
                   v-if="task.person_id"
                   :to="{ name: 'person', params: { id: task.person_id } }"

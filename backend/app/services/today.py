@@ -47,6 +47,10 @@ class TaskItem:
     due: date | None = None
     priority: int = 5
     amount: str | None = None
+    # 提醒专用：内容备好了但没推出去（没配通道 / 通道失败）。
+    # 界面要标出来，否则用户以为"没提醒就不用做"，实际生日就在明天。
+    unsent: bool = False
+    unsent_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -70,7 +74,9 @@ async def collect_tasks(session: AsyncSession, today: date) -> list[TaskItem]:
             .join(Event, Event.id == Reminder.event_id)
             .outerjoin(Person, Person.id == Reminder.person_id)
             .where(
-                Reminder.status == "sent",
+                # sent ∪ pending：只查 sent 会把"没配推送通道"的用户变成
+                # 什么都看不到——提醒写了、内容生成了，却在今日页消失。
+                Reminder.status.in_(("sent", "pending")),
                 Reminder.remind_on >= today - timedelta(days=1),
                 Reminder.remind_on <= today + timedelta(days=TODO_WINDOW_DAYS),
             )
@@ -89,6 +95,8 @@ async def collect_tasks(session: AsyncSession, today: date) -> list[TaskItem]:
                 source_id=reminder.id,
                 due=reminder.remind_on,
                 priority=LEVEL_PRIORITY.get(reminder.level, 4),
+                unsent=reminder.status != "sent",
+                unsent_reason=reminder.last_error if reminder.status != "sent" else None,
             )
         )
 

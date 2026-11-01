@@ -19,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.clock import local_today
 from app.core.errors import AppError, ErrorCode
 from app.models.event import Event, Reminder
 from app.models.fact import Fact, Tag
@@ -293,14 +294,43 @@ async def scan_due_events(session: AsyncSession, today: date) -> list[ReminderDr
 
 
 async def send(session: AsyncSession, reminder: Reminder) -> bool:
-    """按通道发送。失败只改状态，不抛。"""
+    """按通道发送。失败只改状态，不抛。
+
+    失败时**不写 failed**，留在 pending 并记下原因。
+    原因很实在：今日页只显示发出去了的提醒，写成 failed 就等于
+    「没配推送通道的用户，什么提醒都看不到」——既不推送也不显示，
+    比不提醒更糟：用户以为没事，其实生日就在明天。
+    pending + last_error 的语义是「内容备好了，只是没发出去」，
+    今天页照常显示，用户还能一键转成待办。
+    """
     payload = reminder.payload or {}
     message = notify.render(payload, fallback_title="今天有件事")
 
-    channel = await notify.push(session, reminder.user_id, message)
-    if channel is None:
-        reminder.status = "failed"
+    # 先看有没有通道，好给出准确原因（"没配"和"配了但发送失败"是两回事，
+    # 用户要做的事也不一样：前者去设置，后者查 token 是否过期）
+    channels = await notify.effective_channels(session, reminder.user_id)
+    if not channels:
+        reminder.status = "pending"
         reminder.channel = None
+        reminder.last_error = "没有配置推送通道，内容已存下但没发出去"
+        session.add(reminder)
+        await session.commit()
+        return False
+
+    try:
+        channel = await notify.push(session, reminder.user_id, message)
+    except Exception as exc:  # noqa: BLE001 — 发送失败不能让整批提醒作废
+        logger.exception("push raised reminder_id=%s", reminder.id)
+        reminder.status = "pending"
+        reminder.last_error = f"发送出错：{type(exc).__name__}"
+        session.add(reminder)
+        await session.commit()
+        return False
+
+    if channel is None:
+        reminder.status = "pending"
+        reminder.channel = None
+        reminder.last_error = "所有通道都发送失败，检查 webhook / token 是否还有效"
         session.add(reminder)
         await session.commit()
         return False
@@ -308,6 +338,7 @@ async def send(session: AsyncSession, reminder: Reminder) -> bool:
     reminder.status = "sent"
     reminder.channel = channel
     reminder.sent_at = datetime.now(UTC)
+    reminder.last_error = None
     session.add(reminder)
     await session.commit()
     return True
@@ -315,7 +346,9 @@ async def send(session: AsyncSession, reminder: Reminder) -> bool:
 
 async def run_daily(session: AsyncSession, today: date | None = None) -> ScanResult:
     """每日任务主体：扫事件 → 写提醒 → 发送。重跑不会重复发。"""
-    reference = today or datetime.now(UTC).date()
+    # 业务日期用业务时区：容器 TZ 是 UTC，北京时间 0–8 点用 UTC 日期会算成昨天，
+    # T-0 提醒会提前一天发出去
+    reference = today or local_today()
     result = ScanResult()
 
     for draft in await scan_due_events(session, reference):
@@ -336,12 +369,16 @@ async def run_daily(session: AsyncSession, today: date | None = None) -> ScanRes
 
 
 async def to_todo(session: AsyncSession, reminder_id: int, user_id: int) -> Todo:
-    """提醒转待办。重复转返回 409。"""
+    """提醒转待办。重复转返回 409。
+
+    允许 pending：没发出去不代表这件事不用做。用户恰恰是在
+    「没收到推送、在今日页看到这条」的场景下才想把它变待办。
+    """
     reminder = await session.get(Reminder, reminder_id)
     if reminder is None:
         raise AppError(ErrorCode.NOT_FOUND, "找不到这条提醒", status_code=404)
-    if reminder.status not in {"sent", "clicked"}:
-        raise AppError(ErrorCode.INVALID_STATE, "这条提醒还没发出去，不能转待办", status_code=400)
+    if reminder.status not in {"sent", "clicked", "pending"}:
+        raise AppError(ErrorCode.INVALID_STATE, "这条提醒状态不对，不能转待办", status_code=400)
 
     existing = (
         await session.execute(
