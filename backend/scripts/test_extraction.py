@@ -78,6 +78,8 @@ class Item:
     error: str | None = None
     duplicate: bool = False
     segments: int = 0
+    person_id: int | None = None
+    person_name: str = ""
     facts: list[dict] = field(default_factory=list)
     events: list[dict] = field(default_factory=list)
     ledgers: list[dict] = field(default_factory=list)
@@ -115,6 +117,10 @@ async def _dump(item: Item, user_id: int) -> None:
         if raw is not None:
             item.status = raw.status
             item.error = raw.error_msg
+            item.person_id = raw.person_id
+            if raw.person_id is not None:
+                person = await session.get(Person, raw.person_id)
+                item.person_name = person.nickname if person is not None else ""
 
         item.segments = len(
             (
@@ -303,6 +309,14 @@ def _write_report(items: list[Item], out_path: Path, person_name: str | None) ->
             f"事实 {len(item.facts)} · 事件 {len(item.events)} · 往来 {len(item.ledgers)}"
         )
         lines.append("")
+        if item.person_name:
+            lines.append(f"> 归属：**{item.person_name}**（person_id={item.person_id}）")
+        elif item.status == "done":
+            lines.append(
+                "> 归属：**未判定** —— 模型没从候选名单里认出聊天对象，"
+                "所以事实/事件/往来全部没落库（只存了对话原文）。"
+            )
+        lines.append("")
 
         if item.error:
             lines.append(f"> 错误：`{item.error}`")
@@ -377,23 +391,34 @@ async def _main(args: argparse.Namespace) -> int:
     if args.score:
         return _score(Path(args.score).expanduser())
 
-    if not args.dir:
-        print("要么给 --dir 指定截图目录，要么用 --score 算准确率。")
+    if not args.dir and not args.files:
+        print("要么给 --dir 指定截图目录，要么用 --files 指定具体几张贴进来，要么用 --score 算准确率。")
         return 2
 
-    folder = Path(args.dir).expanduser()
-    if not folder.is_dir():
-        print(f"目录不存在：{folder}")
-        return 2
+    if args.files:
+        # 直接点名几个文件：适合「只试水三张」的场景，不用先整理目录
+        files = [Path(item).expanduser() for item in args.files]
+        missing = [str(p) for p in files if not p.is_file()]
+        if missing:
+            print("这些文件不存在或读不到：")
+            for path in missing:
+                print(f"  {path}")
+            return 2
+    else:
+        folder = Path(args.dir).expanduser()
+        if not folder.is_dir():
+            print(f"目录不存在：{folder}")
+            return 2
+        files = sorted(
+            p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
+        )
+        if not files:
+            print(f"{folder} 里没有 jpg / png / webp 图片。")
+            return 2
 
-    files = sorted(
-        p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_SUFFIXES
-    )
-    if not files:
-        print(f"{folder} 里没有 jpg / png / webp 图片。")
-        return 2
     if args.limit:
         files = files[: args.limit]
+    base_dir = files[0].parent
 
     key = settings.deepseek_api_key.get_secret_value() if settings.deepseek_api_key else None
     if not key:
@@ -442,15 +467,16 @@ async def _main(args: argparse.Namespace) -> int:
         if item.duplicate:
             print(f"重复图（已存在 id={item.raw_input_id}），已跳过抽取")
         elif item.status == "done":
+            who = item.person_name or "⚠️ 归属未判定"
             print(
-                f"ok · 事实 {len(item.facts)} / 事件 {len(item.events)} / "
+                f"ok · 归属={who} · 事实 {len(item.facts)} / 事件 {len(item.events)} / "
                 f"往来 {len(item.ledgers)}"
             )
         else:
             print(f"失败：{item.error}")
         items.append(item)
 
-    out = Path(args.out).expanduser() if args.out else Path(args.dir).expanduser().parent / "抽取核对.md"
+    out = Path(args.out).expanduser() if args.out else base_dir / "抽取核对.md"
     _write_report(items, out, person_name)
     return 0
 
@@ -458,6 +484,12 @@ async def _main(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Keeper 抽取准确率测试")
     parser.add_argument("--dir", help="截图目录")
+    parser.add_argument(
+        "--files",
+        nargs="+",
+        default=None,
+        help="直接指定几张图（和 --dir 二选一），例如 --files ~/a.png ~/b.png",
+    )
     parser.add_argument("--user", default="va", help="用哪个账号跑（登录名），默认 va")
     parser.add_argument("--person-id", type=int, default=None, help="强制挂到某个人身上")
     parser.add_argument("--limit", type=int, default=None, help="只跑前 N 张")
