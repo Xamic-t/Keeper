@@ -50,6 +50,8 @@ export interface CalendarEvent {
     tone: Tone
     /** 悬停提示用：农历 / 逾期这类补充说明 */
     hint: string
+    /** 这条能不能删。派生条目（节日、节气、关系表生日）没有真身，删不了。 */
+    canDelete: boolean
   }
 }
 
@@ -133,6 +135,22 @@ export const useCalendarStore = defineStore('calendar', () => {
     )
   }
 
+  /** 新建事件。建完重拉当前区间：新条目可能被 rrule 展开成多天，本地拼不出来。 */
+  async function createEvent(payload: {
+    title: string
+    occurs_on: string
+    type: string
+  }): Promise<void> {
+    await api.post('/events', payload)
+    await load(range.value)
+  }
+
+  /** 删事件。同样重拉：一条 rrule 事件可能在网格上出现好几次。 */
+  async function deleteEvent(eventId: number): Promise<void> {
+    await api.delete(`/events/${eventId}`)
+    await load(range.value)
+  }
+
   /** 待办按到期情况分三档。今天之后统一 accent，不区分远近。 */
   function todoTone(todo: TodoOut): Tone {
     if (!todo.due_date) return 'muted'
@@ -171,6 +189,8 @@ export const useCalendarStore = defineStore('calendar', () => {
           personId: item.person_id,
           tone,
           hint: `${label}${item.lunar ? ' · 农历' : ''}`,
+          // 有真身、且不是算出来的农历生日，才能删
+          canDelete: writable,
         },
       }
     })
@@ -190,7 +210,14 @@ export const useCalendarStore = defineStore('calendar', () => {
           borderColor: 'transparent',
           // 待办一律可拖：改期是它唯一的编辑动作，不涉及别的字段
           editable: true,
-          extendedProps: { kind: 'todo', rawId: todo.id, personId: todo.person_id, tone, hint },
+          extendedProps: {
+            kind: 'todo',
+            rawId: todo.id,
+            personId: todo.person_id,
+            tone,
+            hint,
+            canDelete: true,
+          },
         }
       })
 
@@ -218,5 +245,7 @@ export const useCalendarStore = defineStore('calendar', () => {
     load,
     patchTodoDue,
     patchEventDate,
+    createEvent,
+    deleteEvent,
   }
 })

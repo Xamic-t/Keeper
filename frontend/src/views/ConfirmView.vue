@@ -77,6 +77,9 @@ async function rejectOne(factId: number) {
   }
 }
 
+/** 后端单次上限 200，这里按 50 分片：一批出问题只影响 50 条，也更好看进度。 */
+const BATCH_CHUNK = 50
+
 async function confirmAll() {
   busy.value = -1
   error.value = ''
@@ -86,12 +89,20 @@ async function confirmAll() {
       .filter((item) => item.kind === 'fact')
       .map((item) => item.id)
     if (!factIds.length) return
-    await api.post('/confirmations/batch', { fact_ids: factIds })
+
+    // 以前一次把全部 id 发出去，超过后端上限就整个失败，一条都确认不了
+    let done = 0
+    for (let start = 0; start < factIds.length; start += BATCH_CHUNK) {
+      const slice = factIds.slice(start, start + BATCH_CHUNK)
+      await api.post('/confirmations/batch', { fact_ids: slice })
+      done += slice.length
+    }
+
     // 只清掉 fact 卡片，归属待定的那些还得人工指定
     groups.value = groups.value
       .map((group) => ({ ...group, items: group.items.filter((item) => item.kind !== 'fact') }))
       .filter((group) => group.items.length > 0)
-    flash.value = `已全部确认 ${factIds.length} 条`
+    flash.value = `已全部确认 ${done} 条`
     window.setTimeout(() => (flash.value = ''), 2000)
   } catch (err) {
     showError(err, '批量确认失败')
@@ -117,6 +128,11 @@ async function assignOne(rawInputId: number) {
     dropItem(rawInputId)
     flash.value = '已指派，正在按这个人重新抽取'
     window.setTimeout(() => (flash.value = ''), 2000)
+
+    // 指派会触发后台重新抽取，抽出来的新事实应当出现在这个列表里。
+    // 以前只弹一句话，界面什么都不变，用户以为没生效。抽取是异步的，
+    // 所以过几秒再拉一次（拉早了只能拿到旧结果）。
+    window.setTimeout(() => void load(), 3000)
   } catch (err) {
     showError(err, '指派失败')
   } finally {

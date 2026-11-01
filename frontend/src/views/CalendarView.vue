@@ -115,12 +115,78 @@ function handleEventClick(arg: EventClickArg) {
     return
   }
 
+  // 自己建的事件：给一个能删的面板。以前点上去只会跳档案或弹一句话，
+  // 建错了没有任何办法撤掉。
+  if (props.canDelete) {
+    eventTarget.value = { id: props.rawId, title: arg.event.title }
+    return
+  }
+
   // 事件类：挂在人身上的直接进档案，节日这类没主体的就给一句提示
   if (props.personId) {
     void router.push(`/persons/${props.personId}`)
     return
   }
   say(`${arg.event.title} · ${props.hint}`)
+}
+
+// ── 新建 / 删除事件 ──────────────────────────────────────
+const createOpen = ref(false)
+const createForm = reactive({ title: '', occurs_on: '', type: 'custom' })
+const eventTarget = ref<{ id: number; title: string } | null>(null)
+const eventBusy = ref(false)
+
+const EVENT_TYPES = [
+  { value: 'custom', label: '自定义' },
+  { value: 'payment_due', label: '结款' },
+]
+
+function openCreate() {
+  createForm.title = ''
+  createForm.occurs_on = dayOf(new Date())
+  createForm.type = 'custom'
+  createOpen.value = true
+}
+
+async function saveCreate() {
+  if (!createForm.title.trim()) {
+    say('先写个标题')
+    return
+  }
+  if (!createForm.occurs_on) {
+    say('先选个日期')
+    return
+  }
+  eventBusy.value = true
+  try {
+    await store.createEvent({
+      title: createForm.title.trim(),
+      occurs_on: createForm.occurs_on,
+      type: createForm.type,
+    })
+    createOpen.value = false
+    say('已加上')
+  } catch (err) {
+    say(err instanceof Error ? err.message : '没加上')
+  } finally {
+    eventBusy.value = false
+  }
+}
+
+async function deleteEvent() {
+  const target = eventTarget.value
+  if (!target) return
+  if (!confirm(`删掉「${target.title}」？`)) return
+  eventBusy.value = true
+  try {
+    await store.deleteEvent(target.id)
+    eventTarget.value = null
+    say('已删除')
+  } catch (err) {
+    say(err instanceof Error ? err.message : '没删掉')
+  } finally {
+    eventBusy.value = false
+  }
 }
 
 function closeSheet() {
@@ -181,7 +247,12 @@ const errorText = computed(() => store.error ?? '')
 
 <template>
   <div class="mx-auto max-w-4xl">
-    <PageHeader title="日历" subtitle="生日、节日、节气、结款、待办，都在这一张网格上" />
+    <PageHeader
+      title="日历"
+      subtitle="生日、节日、节气、结款、待办，都在这一张网格上"
+      action-label="新建"
+      @action="openCreate()"
+    />
 
     <div class="mb-3 flex flex-wrap items-center gap-2 text-xs text-ink-soft">
       <span v-if="store.loading">加载中…</span>
@@ -264,6 +335,52 @@ const errorText = computed(() => store.error ?? '')
             去待办页看全部
           </RouterLink>
           <button class="text-ink-soft hover:text-ink" @click="closeSheet">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建事件 -->
+    <div
+      v-if="createOpen"
+      class="fixed inset-0 z-30 flex items-end justify-center bg-ink/25 sm:items-center"
+      @click.self="createOpen = false"
+    >
+      <div class="card w-full max-w-sm rounded-b-none p-4 sm:rounded-b-[14px]">
+        <div class="mb-3 text-sm font-medium">新建一个日子</div>
+        <div class="space-y-3">
+          <input v-model="createForm.title" class="input" placeholder="比如：给王姐送茶" maxlength="100" />
+          <input v-model="createForm.occurs_on" type="date" class="input" />
+          <select v-model="createForm.type" class="input">
+            <option v-for="item in EVENT_TYPES" :key="item.value" :value="item.value">
+              {{ item.label }}
+            </option>
+          </select>
+        </div>
+        <div class="mt-4 flex gap-2">
+          <button class="btn btn-primary flex-1" :disabled="eventBusy" @click="saveCreate">
+            保存
+          </button>
+          <button class="btn btn-ghost" :disabled="eventBusy" @click="createOpen = false">
+            取消
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 点开自己建的事件：可以删 -->
+    <div
+      v-if="eventTarget"
+      class="fixed inset-0 z-30 flex items-end justify-center bg-ink/25 sm:items-center"
+      @click.self="eventTarget = null"
+    >
+      <div class="card w-full max-w-sm rounded-b-none p-4 sm:rounded-b-[14px]">
+        <div class="mb-1 text-sm font-medium">{{ eventTarget.title }}</div>
+        <div class="mb-4 text-xs text-ink-soft">自己建的事件可以删掉</div>
+        <div class="flex gap-2">
+          <button class="btn btn-ghost flex-1 text-danger" :disabled="eventBusy" @click="deleteEvent">
+            删除
+          </button>
+          <button class="btn btn-primary flex-1" @click="eventTarget = null">关闭</button>
         </div>
       </div>
     </div>
