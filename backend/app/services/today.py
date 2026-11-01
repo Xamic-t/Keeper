@@ -5,7 +5,8 @@
 这是一个纯聚合板块：不产生数据，只把别处算好的拼起来。
 两条规则：
   ① 一次请求拿全（手机上发 5 个请求拼页面太慢）
-  ② 最多 3 条（20 人规模，一屏塞 10 条就是制造焦虑），超出的折成 tasks_more
+  ② 上限 20 条：今日页是要真的能勾完的待办清单，不是只给三条意思一下。
+     真超过 20 条说明这一天该先删待办，不是继续往屏幕上堆
 """
 
 import logging
@@ -25,7 +26,7 @@ from app.services import todo as todo_service
 
 logger = logging.getLogger(__name__)
 
-TASK_LIMIT = 3
+TASK_LIMIT = 20
 RECENT_LIMIT = 3
 TODO_WINDOW_DAYS = 3
 

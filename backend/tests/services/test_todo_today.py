@@ -102,15 +102,30 @@ def test_rank_tasks_puts_reminders_first() -> None:
     assert more == 0
 
 
-def test_rank_tasks_truncates_to_three_and_counts_rest() -> None:
+def test_rank_tasks_keeps_whole_list_under_limit() -> None:
+    """今日页要的是能逐条勾完的清单，8 条就全给，不再只截 3 条。"""
     tasks = [
         today_service.TaskItem(type="todo", title=f"任务 {index}", priority=5) for index in range(8)
     ]
 
     ranked, more = today_service.rank_tasks(tasks)
 
-    assert len(ranked) == 3
-    assert more == 5
+    assert len(ranked) == 8
+    assert more == 0
+
+
+def test_rank_tasks_truncates_beyond_limit_and_counts_rest() -> None:
+    """超过上限（20）才截断，多出来的折成 tasks_more。"""
+    total = today_service.TASK_LIMIT + 3
+    tasks = [
+        today_service.TaskItem(type="todo", title=f"任务 {index}", priority=5)
+        for index in range(total)
+    ]
+
+    ranked, more = today_service.rank_tasks(tasks)
+
+    assert len(ranked) == today_service.TASK_LIMIT
+    assert more == 3
 
 
 def test_rank_tasks_on_empty_list() -> None:

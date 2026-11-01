@@ -356,6 +356,30 @@ async def to_todo(session: AsyncSession, reminder_id: int, user_id: int) -> Todo
     return todo
 
 
+async def mark_done(session: AsyncSession, reminder_id: int) -> Reminder:
+    """把一条提醒标记成已处理（今日页勾掉它）。
+
+    语义上等于"用户点过了"：status 从 sent 变 clicked，之后不再出现在今日页。
+    重复勾不报错（幂等），免得手机网络慢时连点两下报 400。
+    """
+    reminder = await session.get(Reminder, reminder_id)
+    if reminder is None:
+        raise AppError(ErrorCode.NOT_FOUND, "找不到这条提醒", status_code=404)
+    if reminder.status == "clicked":
+        return reminder
+    if reminder.status not in {"sent", "pending"}:
+        raise AppError(
+            ErrorCode.INVALID_STATE,
+            "这条提醒当前状态不能标记完成",
+            status_code=400,
+            detail={"status": reminder.status},
+        )
+    reminder.status = "clicked"
+    session.add(reminder)
+    await session.commit()
+    return reminder
+
+
 async def regenerate(session: AsyncSession, reminder_id: int) -> Reminder:
     """换一个建议：重跑生成，覆盖 payload。"""
     reminder = await session.get(Reminder, reminder_id)

@@ -37,6 +37,8 @@ class RawInput(SQLModel, table=True):
     person_id: int | None = Field(default=None, foreign_key="persons.id", ondelete="CASCADE")
     kind: str = Field(max_length=20, nullable=False)
     file_path: str | None = Field(default=None, max_length=500)
+    # 上传时的原始文件名，只用于列表展示。老数据为空，前端退化显示时间
+    original_filename: str | None = Field(default=None, max_length=255)
     file_hash: str | None = Field(default=None, max_length=64)
     ocr_text: str | None = Field(default=None, sa_column=Column(Text))
     raw_text: str | None = Field(default=None, sa_column=Column(Text))

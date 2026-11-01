@@ -90,6 +90,34 @@ async def to_todo(
 
 
 @router.post(
+    "/{reminder_id}/done",
+    response_model=DataResponse[ReminderOut],
+    summary="标记提醒已处理",
+    dependencies=[Depends(require_csrf)],
+)
+async def mark_done(
+    reminder_id: int,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """今日页勾掉一条提醒。幂等：重复点不会报错。"""
+    item = await reminder_service.mark_done(session, reminder_id)
+    return ok(
+        ReminderOut(
+            id=item.id or 0,
+            event_id=item.event_id,
+            person_id=item.person_id,
+            remind_on=item.remind_on,
+            level=item.level,
+            channel=item.channel,
+            payload=item.payload,
+            status=item.status,
+            sent_at=item.sent_at,
+            created_at=item.created_at,
+        )
+    )
+
+
+@router.post(
     "/{reminder_id}/regenerate",
     response_model=DataResponse[ReminderOut],
     summary="换一个建议",

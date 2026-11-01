@@ -12,7 +12,7 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import AppError, ErrorCode
 from app.models.event import Event
 from app.models.fact import Fact, Tag
-from app.models.input import RawInput
+from app.models.input import ChatSegment, RawInput
 from app.models.ledger import Ledger
 from app.models.person import Person
 from app.models.relationship import Relationship
@@ -305,7 +305,14 @@ async def delete_person(session: AsyncSession, person_id: int) -> None:
 async def build_timeline(
     session: AsyncSession, person_id: int, *, limit: int = 50
 ) -> list[dict[str, Any]]:
-    """事实、往来、事件混排的时间线，新的在前。"""
+    """事实、往来、事件混排的时间线，新的在前。
+
+    时间精度分三档，前端按 precision 决定显示成「今天 14:32」还是「10月28日」：
+      minute —— 事实：优先用截图里那句对话的真实时间（chat_segments.said_at），
+                没有就用入库时间。用户看时间线是想回忆"那天几点聊的"，
+                入库时间对他没意义
+      day    —— 往来 / 事件：表里只有日期，没有时分，不编造
+    """
     if await session.get(Person, person_id) is None:
         raise AppError(ErrorCode.NOT_FOUND, "找不到这个人", status_code=404)
 
@@ -322,17 +329,37 @@ async def build_timeline(
         .scalars()
         .all()
     )
-    items.extend(
-        {
-            "day": fact.created_at.date(),
-            "kind": "fact",
-            "title": fact.content,
-            "detail": fact.evidence,
-            "amount": None,
-            "direction": None,
-        }
-        for fact in facts
-    )
+
+    # 一次查出这些截图里最早的对话时间，避免逐条查
+    raw_ids = {fact.source_id for fact in facts if fact.source_id is not None}
+    chat_at: dict[int, datetime] = {}
+    if raw_ids:
+        rows = (
+            await session.execute(
+                select(ChatSegment.raw_input_id, func.min(ChatSegment.said_at))
+                .where(
+                    ChatSegment.raw_input_id.in_(raw_ids),
+                    ChatSegment.said_at.is_not(None),
+                )
+                .group_by(ChatSegment.raw_input_id)
+            )
+        ).all()
+        chat_at = {raw_id: at for raw_id, at in rows if at is not None}
+
+    for fact in facts:
+        said = chat_at.get(fact.source_id) if fact.source_id is not None else None
+        at = said or fact.created_at
+        items.append(
+            {
+                "at": at,
+                "precision": "minute",
+                "kind": "fact",
+                "title": fact.content,
+                "detail": fact.evidence,
+                "amount": None,
+                "direction": None,
+            }
+        )
 
     ledgers = (
         (
@@ -345,17 +372,18 @@ async def build_timeline(
         .scalars()
         .all()
     )
-    items.extend(
-        {
-            "day": ledger.occurred_at,
-            "kind": "ledger",
-            "title": f"{'收到' if ledger.direction == 'in' else '付出'} {ledger.amount} 元",
-            "detail": ledger.note,
-            "amount": str(ledger.amount),
-            "direction": ledger.direction,
-        }
-        for ledger in ledgers
-    )
+    for ledger in ledgers:
+        items.append(
+            {
+                "at": datetime.combine(ledger.occurred_at, time.min),
+                "precision": "day",
+                "kind": "ledger",
+                "title": f"{'收到' if ledger.direction == 'in' else '付出'} {ledger.amount} 元",
+                "detail": ledger.note,
+                "amount": str(ledger.amount),
+                "direction": ledger.direction,
+            }
+        )
 
     events = (
         (
@@ -366,19 +394,25 @@ async def build_timeline(
         .scalars()
         .all()
     )
-    items.extend(
-        {
-            "day": event.occurs_on,
-            "kind": "event",
-            "title": event.title,
-            "detail": event.type,
-            "amount": None,
-            "direction": None,
-        }
-        for event in events
-    )
+    for event in events:
+        items.append(
+            {
+                "at": datetime.combine(event.occurs_on, time.min),
+                "precision": "day",
+                "kind": "event",
+                "title": event.title,
+                "detail": event.type,
+                "amount": None,
+                "direction": None,
+            }
+        )
 
-    items.sort(key=lambda entry: entry["day"], reverse=True)
+    # 带时区的和只有日期的混在一起，排序前统一成 UTC 再比
+    def _sort_key(entry: dict[str, Any]) -> datetime:
+        at = entry["at"]
+        return at if at.tzinfo is not None else at.replace(tzinfo=UTC)
+
+    items.sort(key=_sort_key, reverse=True)
     return items[:limit]
 
 

@@ -46,11 +46,35 @@ async function sendText() {
   await load()
 }
 
-function statusText(status: string) {
-  if (status === 'done') return '已识别'
-  if (status === 'processing') return '识别中'
-  if (status === 'failed') return '失败'
-  return '排队中'
+/** 有原始文件名就显示名字，老数据没存名字的退化成时间 */
+function displayName(item: RawInputOut) {
+  if (item.original_filename) return item.original_filename
+  return item.kind === 'text' ? '一句话投喂' : `截图 ${formatTime(item.created_at)}`
+}
+
+function formatTime(iso: string) {
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const today = new Date()
+  const sameDay =
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate()
+  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  return sameDay ? `今天 ${clock}` : `${at.getMonth() + 1}月${at.getDate()}日 ${clock}`
+}
+
+/** 只在没完成／出错时才提示状态，正常的不打扰 */
+function statusHint(item: RawInputOut) {
+  if (item.status === 'failed') return item.error_msg || '识别失败'
+  if (item.status === 'processing') return '识别中…'
+  if (item.status === 'pending') return '排队中…'
+  return ''
+}
+
+function thumbUrl(item: RawInputOut) {
+  return item.kind === 'screenshot' ? `/api/raw-inputs/${item.id}/file` : ''
 }
 
 onMounted(load)
@@ -61,7 +85,7 @@ onMounted(load)
     <PageHeader title="投喂" subtitle="把聊天截图丢进来，系统替你记住" />
 
     <section class="card mb-4 p-4">
-      <h2 class="mb-2 text-sm font-medium">上传截图</h2>
+      <h2 class="mb-2 text-sm font-medium">批量上传截图</h2>
       <p class="mb-3 text-xs text-ink-soft">
         一次最多 10 张，单张不超过 8MB，支持 jpg / png / webp。同一张图不会重复处理。
       </p>
@@ -91,16 +115,47 @@ onMounted(load)
 
     <p v-if="message" class="mb-4 text-sm text-ink-soft">{{ message }}</p>
 
-    <p class="mb-3 text-sm text-ink-soft">识别结果会出现在「确认」里：系统先抽出事实和往来，你点一遍 ✓ 才进档案。</p>
+    <p class="mb-3 text-sm text-ink-soft">
+      识别结果会出现在「确认」里：系统先抽出事实和往来，你点一遍 ✓ 才进档案。
+    </p>
 
     <ul v-if="items.length" class="mt-4 space-y-2">
-      <li
-        v-for="item in items"
-        :key="item.id"
-        class="card flex items-center justify-between px-4 py-3 text-sm"
-      >
-        <span>{{ item.kind === 'text' ? '一句话投喂' : '截图' }}</span>
-        <span class="tag">{{ statusText(item.status) }}</span>
+      <li v-for="item in items" :key="item.id" class="card flex items-center gap-3 px-3 py-3">
+        <!-- 截图直接给缩略图，点开看原图 -->
+        <a
+          v-if="thumbUrl(item)"
+          :href="thumbUrl(item)"
+          target="_blank"
+          class="block h-16 w-12 shrink-0 overflow-hidden rounded-md bg-bg-alt"
+        >
+          <img
+            :src="thumbUrl(item)"
+            alt=""
+            loading="lazy"
+            class="h-full w-full object-cover"
+          />
+        </a>
+        <div
+          v-else
+          class="flex h-16 w-12 shrink-0 items-center justify-center rounded-md bg-bg-alt text-lg text-ink-soft"
+        >
+          ✎
+        </div>
+
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-sm">{{ displayName(item) }}</div>
+          <div class="mt-0.5 text-xs text-ink-soft">{{ formatTime(item.created_at) }}</div>
+          <div v-if="statusHint(item)" class="mt-1 text-xs text-warn">{{ statusHint(item) }}</div>
+        </div>
+
+        <a
+          v-if="thumbUrl(item)"
+          :href="thumbUrl(item)"
+          target="_blank"
+          class="shrink-0 text-xs text-ink-soft hover:text-accent"
+        >
+          原图
+        </a>
       </li>
     </ul>
   </div>

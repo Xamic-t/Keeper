@@ -48,6 +48,8 @@ class RawInputOut(BaseModel):
     kind: str
     status: str
     person_id: int | None = None
+    # 上传时的原始文件名，前端优先显示它；老数据为空则显示投喂时间
+    original_filename: str | None = None
     error_msg: str | None = None
     created_at: datetime
     processed_at: datetime | None = None
@@ -180,6 +182,7 @@ async def list_raw_inputs(
                 kind=row.kind,
                 status=row.status,
                 person_id=row.person_id,
+                original_filename=row.original_filename,
                 error_msg=row.error_msg,
                 created_at=row.created_at,
                 processed_at=row.processed_at,
@@ -206,6 +209,7 @@ async def get_raw_input(
             kind=raw_input.kind,
             status=raw_input.status,
             person_id=raw_input.person_id,
+            original_filename=raw_input.original_filename,
             error_msg=raw_input.error_msg,
             created_at=raw_input.created_at,
             processed_at=raw_input.processed_at,
@@ -250,6 +254,7 @@ async def assign_raw_input(
             kind=raw_input.kind,
             status=raw_input.status,
             person_id=raw_input.person_id,
+            original_filename=raw_input.original_filename,
             error_msg=raw_input.error_msg,
             created_at=raw_input.created_at,
             processed_at=raw_input.processed_at,

@@ -80,6 +80,8 @@ async def ingest_images(
             person_id=person_id,
             kind="screenshot",
             file_hash=content_hash,
+            # 截断到列宽，中文文件名按字符数算足够宽松
+            original_filename=(item.filename or "").strip()[:255] or None,
             status="pending",
         )
         session.add(raw_input)

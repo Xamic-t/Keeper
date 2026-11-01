@@ -150,9 +150,16 @@ class PersonCounts(BaseModel):
 
 
 class TimelineItem(BaseModel):
-    """时间线上的一格。"""
+    """时间线上的一格。
 
-    day: date
+    at 是事件发生时间；precision 说明能精确到哪儿：
+      minute —— 有时分（事实：用的是截图里那句对话的时间）
+      day    —— 只有日期（往来 / 事件，表里就没有时分）
+    前端按 precision 决定显示「今天 14:32」还是「10月28日」。
+    """
+
+    at: datetime
+    precision: str = "minute"
     kind: str  # fact | ledger | event
     title: str
     detail: str | None = None

@@ -247,12 +247,18 @@ async def batch_confirm(session: AsyncSession, fact_ids: list[int], user_id: int
 
 
 async def list_confirmations(session: AsyncSession) -> list[ConfirmationGroup]:
-    """待确认条目，按人分组。归属待定的材料单独一组。"""
+    """待确认条目，按人分组。归属待定的材料单独一组。
+
+    组顺序必须**稳定**：用户点掉一条时，剩下的组不能换位置。
+    所以不能先按 confidence 全局排序再分组（那样组的先后取决于谁有最低分条目，
+    点掉最低分那条，这一组就跑到后面去了）。正确做法是先分组，
+    再按「组内最新一条的时间」给组排序，组内按置信度从低到高（先看不靠谱的）。
+    """
     stmt = (
         select(Fact, Person.nickname)
         .join(Person, Person.id == Fact.person_id)
         .where(Fact.status == "pending")
-        .order_by(Fact.confidence.asc(), Fact.created_at.desc())
+        .order_by(Fact.created_at.desc())
     )
     rows = (await session.execute(stmt)).all()
 
@@ -313,4 +319,16 @@ async def list_confirmations(session: AsyncSession) -> list[ConfirmationGroup]:
             )
         grouped[0] = ConfirmationGroup(person_id=None, nickname="归属待定", items=items)
 
-    return list(grouped.values())
+    groups = list(grouped.values())
+    for group in groups:
+        # 组内：置信度低的在前，同分时新的在前
+        group.items.sort(key=lambda item: (item.confidence, -item.created_at.timestamp()))
+
+    # 组间：待定组永远第一（不处理就会一直堆着），其余按组内最新一条倒序。
+    # 这个键只依赖「组里还剩什么」，点掉一条只要不是最后一条，组的位置就不动。
+    def _group_key(group: ConfirmationGroup) -> tuple[int, float]:
+        latest = max(item.created_at for item in group.items)
+        return (0 if group.person_id is None else 1, -latest.timestamp())
+
+    groups.sort(key=_group_key)
+    return groups

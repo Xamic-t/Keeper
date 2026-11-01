@@ -36,7 +36,7 @@ from app.services.vision import vision
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
 # category → 半衰期（天）。None = 永久不衰减
@@ -116,7 +116,7 @@ class ExtractionResult:
 
 def build_prompt(candidates: list[dict[str, Any]], kind: str) -> str:
     """把候选人和材料类型塞进模板。模板缺失是部署错误，直接 500。"""
-    template_path = PROMPTS_DIR / "v1_extract.md"
+    template_path = PROMPTS_DIR / "v2_extract.md"
     try:
         template = template_path.read_text(encoding="utf-8")
     except OSError as exc:

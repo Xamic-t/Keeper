@@ -140,7 +140,11 @@ def main() -> int:
     print(f"          api_key ={_mask(fallback_key)}")
     print(
         "          状态    "
-        + ("已启用（主通道失败会自动切过去）" if fallback_key else "已关闭（没有 Key，代码会跳过它）")
+        + (
+            "已启用（主通道失败会自动切过去）"
+            if fallback_key
+            else "已关闭（没有 Key，代码会跳过它）"
+        )
     )
 
     if not api_key:
@@ -167,8 +171,8 @@ def main() -> int:
     print("\n【3/4】图片请求（验视觉，这是投喂能不能用的关键）")
     data_url = "data:image/png;base64," + base64.b64encode(_test_image()).decode()
     question = (
-        f"这张图的背景是什么颜色？图上写了什么文字？"
-        f"只回答一行，格式：颜色=<颜色> 文字=<文字>"
+        "这张图的背景是什么颜色？图上写了什么文字？"
+        "只回答一行，格式：颜色=<颜色> 文字=<文字>"
     )
     image_content = [
         {"type": "text", "text": question},
@@ -200,7 +204,7 @@ def main() -> int:
     if vision_ok:
         print(f"  ✅ 可以用。当前 VISION_MODEL={working_model}")
         print("\n  下一步：起后端和前端，然后传截图。")
-        print("    终端 A：cd backend && uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000")
+        print("    终端 A：cd backend && uv run uvicorn app.main:app --reload --port 8000")
         print("    终端 B：cd frontend && pnpm dev")
         return 0
 

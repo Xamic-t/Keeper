@@ -11,6 +11,7 @@ const persons = ref<PersonListItem[]>([])
 const loading = ref(true)
 const busy = ref<number | null>(null)
 const error = ref('')
+const flash = ref('')
 
 function showError(err: unknown, fallback: string) {
   error.value = err instanceof Error ? err.message : fallback
@@ -32,12 +33,28 @@ async function loadPersons() {
   persons.value = payload.data
 }
 
+/**
+ * 处理完一条后只在本地摘掉它，**不重新拉列表**。
+ * 重新拉的话后端顺序一变，用户刚点过的那个人就会跳到别处，
+ * 视线跟着跑，连着点几条会点错。
+ */
+function dropItem(itemId: number) {
+  const next: ConfirmationGroup[] = []
+  for (const group of groups.value) {
+    const items = group.items.filter((item) => item.id !== itemId)
+    if (items.length) next.push({ ...group, items })
+  }
+  groups.value = next
+}
+
 async function confirmOne(factId: number) {
   busy.value = factId
   error.value = ''
   try {
     await api.post(`/confirmations/${factId}/confirm`)
-    await load()
+    dropItem(factId)
+    flash.value = '已确认，进档案了'
+    window.setTimeout(() => (flash.value = ''), 1600)
   } catch (err) {
     showError(err, '确认失败')
   } finally {
@@ -50,7 +67,9 @@ async function rejectOne(factId: number) {
   error.value = ''
   try {
     await api.post(`/confirmations/${factId}/reject`)
-    await load()
+    dropItem(factId)
+    flash.value = '已驳回'
+    window.setTimeout(() => (flash.value = ''), 1600)
   } catch (err) {
     showError(err, '驳回失败')
   } finally {
@@ -68,7 +87,12 @@ async function confirmAll() {
       .map((item) => item.id)
     if (!factIds.length) return
     await api.post('/confirmations/batch', { fact_ids: factIds })
-    await load()
+    // 只清掉 fact 卡片，归属待定的那些还得人工指定
+    groups.value = groups.value
+      .map((group) => ({ ...group, items: group.items.filter((item) => item.kind !== 'fact') }))
+      .filter((group) => group.items.length > 0)
+    flash.value = `已全部确认 ${factIds.length} 条`
+    window.setTimeout(() => (flash.value = ''), 2000)
   } catch (err) {
     showError(err, '批量确认失败')
   } finally {
@@ -90,7 +114,9 @@ async function assignOne(rawInputId: number) {
   try {
     await api.post(`/raw-inputs/${rawInputId}/assign`, { person_id: personId })
     delete pickedPerson.value[rawInputId]
-    await load()
+    dropItem(rawInputId)
+    flash.value = '已指派，正在按这个人重新抽取'
+    window.setTimeout(() => (flash.value = ''), 2000)
   } catch (err) {
     showError(err, '指派失败')
   } finally {
@@ -124,6 +150,7 @@ onMounted(async () => {
     />
 
     <p v-if="error" class="mb-3 rounded-md bg-warn/10 px-3 py-2 text-sm text-warn">{{ error }}</p>
+    <p v-if="flash" class="mb-3 rounded-md bg-success/10 px-3 py-2 text-sm text-success">{{ flash }}</p>
 
     <div v-if="loading" class="text-sm text-ink-soft">加载中…</div>
 

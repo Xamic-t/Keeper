@@ -276,13 +276,15 @@ def _write_report(items: list[Item], out_path: Path, person_name: str | None) ->
     lines.append("")
     lines.append("**怎么用**：逐条读「内容」，对照「出处」。")
     lines.append("**抽错的那一条**，把前面的 `- [ ]` 改成 `- [x]`。抽对的不用动。")
-    lines.append("改完保存，然后跑：`uv run python scripts/test_extraction.py --score <这个文件的路径>`")
+    lines.append(
+        "改完保存，然后跑：`uv run python scripts/test_extraction.py --score <这个文件的路径>`"
+    )
     lines.append("")
     lines.append("---")
     lines.append("")
     lines.append("## 汇总")
     lines.append("")
-    lines.append(f"| 项 | 数量 |")
+    lines.append("| 项 | 数量 |")
     lines.append("|---|---|")
     lines.append(f"| 图片 | {len(items)} |")
     lines.append(f"| 抽取成功 | {done} |")
@@ -335,7 +337,8 @@ def _write_report(items: list[Item], out_path: Path, person_name: str | None) ->
         for ledger in item.ledgers:
             lines.append(
                 f"- [ ] **往来** · {ledger['direction']} · {ledger['kind']} · "
-                f"{ledger['amount']} 元 · {ledger['occurred_at']} — {ledger['note'] or '（无备注）'}"
+                f"{ledger['amount']} 元 · {ledger['occurred_at']} — "
+                f"{ledger['note'] or '（无备注）'}"
             )
 
         if not (item.facts or item.events or item.ledgers):
@@ -392,7 +395,10 @@ async def _main(args: argparse.Namespace) -> int:
         return _score(Path(args.score).expanduser())
 
     if not args.dir and not args.files:
-        print("要么给 --dir 指定截图目录，要么用 --files 指定具体几张贴进来，要么用 --score 算准确率。")
+        print(
+            "要么给 --dir 指定截图目录，要么用 --files 指定几张图，"
+            "要么用 --score 算准确率。"
+        )
         return 2
 
     if args.files:

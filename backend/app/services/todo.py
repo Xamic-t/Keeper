@@ -125,7 +125,31 @@ async def ensure_daily_template(session: AsyncSession, user_id: int, today: date
 
     幂等的判据是 (source='template', due_date=今天)，不是 created_at：
     后者带时区，跨时区跑会漏判。
+
+    同时把**以前没做完的模板任务**置为 dropped：
+    "今天复盘数据"这种事昨天没做就算了，不能今天还在今日页挂一条昨天的，
+    否则几天不打开就堆出十条一模一样的，清单就没法看了。
     """
+    stale = (
+        (
+            await session.execute(
+                select(Todo).where(
+                    Todo.source == "template",
+                    Todo.status == "open",
+                    Todo.due_date.is_not(None),
+                    Todo.due_date < today,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for todo in stale:
+        todo.status = "dropped"
+        session.add(todo)
+    if stale:
+        await session.commit()
+
     existing = (
         (
             await session.execute(

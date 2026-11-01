@@ -199,6 +199,7 @@ export interface RawInputOut {
   kind: string
   status: string
   person_id: number | null
+  original_filename: string | null
   error_msg: string | null
   created_at: string
   processed_at: string | null

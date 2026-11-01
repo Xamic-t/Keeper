@@ -7,6 +7,16 @@ import type { FactOut, LedgerOut, PersonDetail } from '@/api/types'
 import EmptyState from '@/components/EmptyState.vue'
 import PageHeader from '@/components/PageHeader.vue'
 
+interface TimelineItem {
+  at: string
+  precision: 'minute' | 'day' | string
+  kind: string
+  title: string
+  detail: string | null
+  amount: string | null
+  direction: string | null
+}
+
 const route = useRoute()
 const router = useRouter()
 
@@ -14,7 +24,7 @@ const personId = Number(route.params.id)
 const detail = ref<PersonDetail | null>(null)
 const facts = ref<FactOut[]>([])
 const ledger = ref<LedgerOut[]>([])
-const timeline = ref<{ day: string; kind: string; title: string; detail: string | null }[]>([])
+const timeline = ref<TimelineItem[]>([])
 const loading = ref(true)
 const rewriting = ref(false)
 const message = ref('')
@@ -26,9 +36,7 @@ async function load() {
       api.get<PersonDetail>(`/persons/${personId}`),
       api.get<FactOut[]>(`/persons/${personId}/facts`),
       api.get<LedgerOut[]>(`/persons/${personId}/ledger`),
-      api.get<{ day: string; kind: string; title: string; detail: string | null }[]>(
-        `/persons/${personId}/timeline`,
-      ),
+      api.get<TimelineItem[]>(`/persons/${personId}/timeline`),
     ])
     detail.value = person
     facts.value = factList
@@ -37,6 +45,46 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+/** 有上一页就退回去；直接输网址进来的（没有历史）就回人列表 */
+function goBack() {
+  const canGoBack = Boolean(window.history.state?.back)
+  if (canGoBack) router.back()
+  else router.push({ name: 'persons' })
+}
+
+function pad(n: number) {
+  return String(n).padStart(2, '0')
+}
+
+/** 时间线上的一格：能到分钟就显示分钟，只有日期的就只显示日期 */
+function formatAt(item: TimelineItem) {
+  const at = new Date(item.at)
+  if (Number.isNaN(at.getTime())) return ''
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const dayDiff = Math.round((startOfToday.getTime() - new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime()) / 86400000)
+
+  if (item.precision === 'day') {
+    return at.getFullYear() === now.getFullYear()
+      ? `${at.getMonth() + 1}月${at.getDate()}日`
+      : `${at.getFullYear()}年${at.getMonth() + 1}月${at.getDate()}日`
+  }
+
+  const clock = `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  if (dayDiff === 0) return `今天 ${clock}`
+  if (dayDiff === 1) return `昨天 ${clock}`
+  if (at.getFullYear() === now.getFullYear()) {
+    return `${at.getMonth() + 1}月${at.getDate()}日 ${clock}`
+  }
+  return `${at.getFullYear()}年${at.getMonth() + 1}月${at.getDate()}日 ${clock}`
+}
+
+function kindLabel(kind: string) {
+  if (kind === 'ledger') return '往来'
+  if (kind === 'event') return '事件'
+  return '事实'
 }
 
 async function rewriteSummary() {
@@ -64,6 +112,15 @@ onMounted(load)
 
 <template>
   <div class="mx-auto max-w-3xl">
+    <!-- 返回：手机上原本没有任何回上层的入口 -->
+    <button
+      class="mb-2 -ml-1 flex items-center gap-1 rounded-md px-1 py-1 text-sm text-ink-soft transition hover:text-ink"
+      @click="goBack"
+    >
+      <span aria-hidden="true">←</span>
+      <span>人</span>
+    </button>
+
     <div v-if="loading" class="text-sm text-ink-soft">加载中…</div>
 
     <template v-else-if="detail">
@@ -107,6 +164,29 @@ onMounted(load)
         <span v-for="tag in detail.tags" :key="tag" class="tag">{{ tag }}</span>
       </section>
 
+      <!-- 时间线 -->
+      <section class="mb-6">
+        <h2 class="mb-2 text-sm font-medium text-ink-soft">时间线</h2>
+        <div v-if="timeline.length" class="card">
+          <div
+            v-for="(item, index) in timeline"
+            :key="index"
+            class="flex gap-3 px-4 py-3"
+            :class="index > 0 ? 'border-t border-border' : ''"
+          >
+            <div class="w-24 shrink-0 pt-0.5 text-right">
+              <div class="text-xs tabular-nums text-ink-soft">{{ formatAt(item) }}</div>
+              <div class="mt-0.5 text-[11px] text-ink-soft/60">{{ kindLabel(item.kind) }}</div>
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-sm leading-relaxed">{{ item.title }}</div>
+              <p v-if="item.detail" class="mt-1 text-xs text-ink-soft">{{ item.detail }}</p>
+            </div>
+          </div>
+        </div>
+        <EmptyState v-else title="时间线还是空的" hint="确认几条事实后，这里按时间排出来" />
+      </section>
+
       <!-- 事实 -->
       <section class="mb-6">
         <h2 class="mb-2 text-sm font-medium text-ink-soft">事实</h2>
@@ -135,18 +215,6 @@ onMounted(load)
           </div>
         </div>
         <EmptyState v-else title="还没有往来记录" />
-      </section>
-
-      <!-- 时间线 -->
-      <section class="mb-8">
-        <h2 class="mb-2 text-sm font-medium text-ink-soft">时间线</h2>
-        <div v-if="timeline.length" class="card divide-y divide-border">
-          <div v-for="(item, index) in timeline" :key="index" class="flex gap-3 px-4 py-3 text-sm">
-            <span class="w-20 shrink-0 text-ink-soft">{{ item.day }}</span>
-            <span class="min-w-0 flex-1">{{ item.title }}</span>
-          </div>
-        </div>
-        <EmptyState v-else title="时间线还是空的" />
       </section>
 
       <div class="flex justify-end">
