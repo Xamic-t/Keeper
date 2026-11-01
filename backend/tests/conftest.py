@@ -41,8 +41,8 @@ class Account:
     password: str = TEST_PASSWORD
 
 
-def create_user(prefix: str = "t") -> Account:
-    """建一个普通角色账号。
+def create_user(prefix: str = "t", role: str = "member") -> Account:
+    """建一个账号。默认 member，需要验证 owner 权限时传 role="owner"。
 
     直接写 SQL 而不用 ORM：users 表没有开 RLS，也不该为测试引入额外封装。
     """
@@ -54,7 +54,7 @@ def create_user(prefix: str = "t") -> Account:
                 INSERT INTO users
                     (username, password_hash, display_name, role, is_active,
                      failed_attempts, keep_original_images)
-                VALUES (:username, :password_hash, :display_name, 'member', true, 0, true)
+                VALUES (:username, :password_hash, :display_name, :role, true, 0, true)
                 RETURNING id
                 """
             ),
@@ -62,6 +62,7 @@ def create_user(prefix: str = "t") -> Account:
                 "username": username,
                 "password_hash": hash_password(TEST_PASSWORD),
                 "display_name": username,
+                "role": role,
             },
         ).one()
     return Account(id=row[0], username=username)

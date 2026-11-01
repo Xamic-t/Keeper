@@ -5,7 +5,7 @@
 规则：
   · 不能删自己
   · 不能禁用最后一个 owner
-  · 新建账号只给初始密码，用户自己改
+  · 建号必须由调用方指定初始密码（仓库里不留任何默认口令）
 """
 
 from datetime import datetime
@@ -24,8 +24,6 @@ from app.models.user import User
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
 
-INITIAL_PASSWORD = "keeper-2026"
-
 
 class UserOut(BaseModel):
     id: int
@@ -41,7 +39,11 @@ class UserCreateIn(BaseModel):
     username: str = Field(min_length=1, max_length=100, description="用户名 / 手机号 / 邮箱")
     display_name: str | None = Field(default=None, max_length=100)
     role: Literal["owner", "member"] = "member"
-    password: str = Field(default=INITIAL_PASSWORD, min_length=8, max_length=128)
+    # 以前这里有个写死的默认口令，而仓库是公开的 —— 等于公开了建号口令（评审 P2-1）。
+    # 现在必须显式传，没有默认值。
+    password: str = Field(
+        min_length=8, max_length=128, description="初始密码，必须由调用方指定"
+    )
 
 
 class UserUpdateIn(BaseModel):

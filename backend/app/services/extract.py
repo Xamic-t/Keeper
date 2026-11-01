@@ -286,15 +286,23 @@ async def _candidates(session: AsyncSession) -> list[dict[str, Any]]:
 
 
 async def _clear_previous(session: AsyncSession, raw_input_id: int) -> None:
-    """同一张图重复抽取时先清旧结果，保证幂等。"""
+    """同一张图重复抽取时先清旧结果，保证幂等。
+
+    只清 **pending** 的事实（评审 P2-2）：用户已经在确认页点过"对"的条目，
+    不能因为一次重抽就被静默删掉。宁可多留一条待确认，也不删已确认的。
+    事件和账目没有确认态，照旧整批清。
+    """
     await session.execute(delete(ChatSegment).where(ChatSegment.raw_input_id == raw_input_id))
-    for model in (Fact, Event):
-        await session.execute(
-            delete(model).where(
-                model.source_type == "screenshot",  # type: ignore[attr-defined]
-                model.source_id == raw_input_id,
-            )
+    await session.execute(
+        delete(Fact).where(
+            Fact.source_type == "screenshot",
+            Fact.source_id == raw_input_id,
+            Fact.status == "pending",
         )
+    )
+    await session.execute(
+        delete(Event).where(Event.source_type == "screenshot", Event.source_id == raw_input_id)
+    )
     await session.execute(
         delete(Ledger).where(Ledger.source_type == "screenshot", Ledger.source_id == raw_input_id)
     )
