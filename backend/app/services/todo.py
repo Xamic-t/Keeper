@@ -87,14 +87,26 @@ async def create_todo(
 
 
 async def update_todo(session: AsyncSession, todo_id: int, changes: dict[str, Any]) -> Todo:
-    """改内容或勾选。done 与 open 之间可以来回改（点错了要能改回来）。"""
+    """改内容或勾选。done 与 open 之间可以来回改（点错了要能改回来）。
+
+    关于 None：`changes` 来自 `model_dump(exclude_unset=True)`，所以**没传**的字段
+    根本不会出现在里面。也就是说，这里收到 None 只有一种含义：调用方显式要求清空。
+    以前统一 `if value is None: continue`，导致"清空截止日"静默失败，
+    而界面照样提示"日期已清掉"——用户以为删了，刷新又回来。
+    """
     todo = await session.get(Todo, todo_id)
     if todo is None:
         raise AppError(ErrorCode.NOT_FOUND, "找不到这条待办", status_code=404)
 
     allowed = {"title", "detail", "due_date", "person_id", "status", "ai_reason"}
+    # 允许置空的字段：这些在数据库里可空，清空是有意义的操作
+    nullable = {"detail", "due_date", "person_id", "ai_reason"}
+
     for key, value in changes.items():
-        if key not in allowed or value is None:
+        if key not in allowed:
+            continue
+        if value is None and key not in nullable:
+            # title / status 是必填，传 null 当作没传（Pydantic 已经挡了一层，这里是兜底）
             continue
         if key == "status":
             if value not in STATUSES:
@@ -102,7 +114,7 @@ async def update_todo(session: AsyncSession, todo_id: int, changes: dict[str, An
             todo.status = value
             todo.done_at = datetime.now(UTC) if value == "done" else None
             continue
-        if key == "person_id" and await session.get(Person, value) is None:
+        if key == "person_id" and value is not None and await session.get(Person, value) is None:
             raise AppError(ErrorCode.NOT_FOUND, "找不到这个人", status_code=404)
         setattr(todo, key, value)
 

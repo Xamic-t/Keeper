@@ -10,11 +10,15 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
 from app.services import confirm as confirm_service
 
 router = APIRouter(prefix="/confirmations", tags=["confirmations"])
+
+# 批量确认单次上限。前端按 50 分片，这里留 4 倍余量给脚本和重试。
+BATCH_LIMIT = 200
 
 
 class ConfirmationItemOut(BaseModel):
@@ -42,7 +46,9 @@ class ConfirmResultOut(BaseModel):
 
 
 class BatchIn(BaseModel):
-    fact_ids: list[int] = Field(min_length=1, max_length=50)
+    # 上限不写在 Field 里：Pydantic 的 422 只说"list 太长"，用户看不懂也不知道怎么办。
+    # 放到 handler 里判，能返回中文 + 400，前端可以直接把话弹给用户。
+    fact_ids: list[int] = Field(min_length=1)
 
 
 class BatchOut(BaseModel):
@@ -167,7 +173,17 @@ async def batch(
     user: Annotated[CurrentUser, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """一次确认多条。不是 pending 的跳过，不整体失败。"""
+    """一次确认多条。不是 pending 的跳过，不整体失败。
+
+    单次上限 200：一个事务里改太多行会拖长锁持有时间，也让失败回滚代价变大。
+    超过时给明确提示，而不是让界面收到 422 之后没话可说。
+    """
+    if len(payload.fact_ids) > BATCH_LIMIT:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"一次最多确认 {BATCH_LIMIT} 条，请分批提交",
+            status_code=400,
+        )
     result = await confirm_service.batch_confirm(session, payload.fact_ids, user.id)
     return ok(
         BatchOut(confirmed=result.confirmed, skipped=result.skipped, skipped_ids=result.skipped_ids)
