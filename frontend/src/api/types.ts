@@ -7,19 +7,6 @@ export interface UserOut {
   role: string
 }
 
-export interface LoginData {
-  user: UserOut
-  csrf_token: string
-}
-
-export interface PageMeta {
-  total: number
-  page: number
-  size: number
-  total_pages: number
-  has_next: boolean
-}
-
 export interface PersonListItem {
   id: number
   nickname: string
@@ -76,6 +63,15 @@ export interface FactOut {
   status: string
   last_confirmed_at: string | null
   created_at: string
+}
+
+export interface TagOut {
+  id: number
+  person_id: number
+  key: string
+  value: string
+  confidence: number | null
+  expires_at: string | null
 }
 
 export interface LedgerOut {
@@ -156,25 +152,6 @@ export interface ConfirmationGroup {
   items: ConfirmationItem[]
 }
 
-export interface ReminderOut {
-  id: number
-  event_id: number
-  person_id: number | null
-  remind_on: string
-  level: string
-  channel: string | null
-  payload: {
-    headline?: string
-    suggestion?: string
-    reasons?: string[]
-    script?: string
-    degraded?: boolean
-  } | null
-  status: string
-  sent_at: string | null
-  created_at: string
-}
-
 export interface SettingsOut {
   keep_original_images: boolean
   channels: {
@@ -185,16 +162,6 @@ export interface SettingsOut {
     is_active: boolean
     has_secret: boolean
   }[]
-}
-
-export interface AdminUser {
-  id: number
-  username: string
-  display_name: string | null
-  role: string
-  is_active: boolean
-  last_login_at: string | null
-  created_at: string
 }
 
 export interface RawInputOut {

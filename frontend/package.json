@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit -p tsconfig.json && vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "preview": "vite preview",
-    "gen:types": "openapi-typescript http://127.0.0.1:8000/openapi.json -o src/api/schema.d.ts"
+    "gen:types": "node scripts/gen-api-types.mjs"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.22",
@@ -21,10 +23,12 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "happy-dom": "^21.0.4",
     "openapi-typescript": "^7.4.4",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
+    "vitest": "^5.0.5",
     "vue-tsc": "^2.1.10"
   }
 }

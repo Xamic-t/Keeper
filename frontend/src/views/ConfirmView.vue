@@ -114,6 +114,57 @@ async function confirmAll() {
 // 归属待定：每张卡片记一个选中的 person_id，确认后走 assign 接口
 const pickedPerson = ref<Record<number, number>>({})
 
+// 已归属事实的"改内容/改归属后确认"。后端契约早就有了，这里把它真正接进界面。
+const editingId = ref<number | null>(null)
+const editForm = ref({ content: '', category: 'preference', personId: 0 })
+
+const CATEGORIES = [
+  { value: 'permanent', label: '永久' },
+  { value: 'taboo', label: '禁忌' },
+  { value: 'structure', label: '结构' },
+  { value: 'preference', label: '偏好' },
+  { value: 'situation', label: '近况' },
+  { value: 'mood', label: '情绪' },
+]
+
+function startEdit(item: ConfirmationGroup['items'][number], personId: number | null) {
+  editingId.value = item.id
+  editForm.value = {
+    content: item.content,
+    category: item.category,
+    personId: personId ?? 0,
+  }
+  error.value = ''
+}
+
+async function saveEdit(factId: number) {
+  if (!editForm.value.content.trim()) {
+    error.value = '内容不能为空'
+    return
+  }
+  if (!editForm.value.personId) {
+    error.value = '先选归属人'
+    return
+  }
+  busy.value = factId
+  error.value = ''
+  try {
+    await api.patch(`/confirmations/${factId}`, {
+      person_id: editForm.value.personId,
+      content: editForm.value.content.trim(),
+      category: editForm.value.category,
+    })
+    editingId.value = null
+    dropItem(factId)
+    flash.value = '已修改并确认'
+    window.setTimeout(() => (flash.value = ''), 1600)
+  } catch (err) {
+    showError(err, '修改失败')
+  } finally {
+    busy.value = null
+  }
+}
+
 async function assignOne(rawInputId: number) {
   const personId = pickedPerson.value[rawInputId]
   if (!personId) {
@@ -152,7 +203,8 @@ const hasUnassigned = computed(() =>
 
 onMounted(async () => {
   await load()
-  if (hasUnassigned.value) await loadPersons()
+  // 编辑已归属事实时也要选人，和归属待定一样复用这份列表
+  await loadPersons().catch(() => undefined)
 })
 </script>
 
@@ -220,7 +272,36 @@ onMounted(async () => {
               </button>
             </div>
 
-            <!-- 已归属：确认 / 驳回 -->
+            <!-- 已归属：确认 / 驳回 / 改正后确认 -->
+            <div v-else-if="editingId === item.id" class="space-y-2">
+              <textarea
+                v-model="editForm.content"
+                class="input h-20 resize-none"
+                maxlength="2000"
+              ></textarea>
+              <div class="flex gap-2">
+                <select v-model="editForm.personId" class="input min-w-0 flex-1">
+                  <option :value="0" disabled>归属给谁…</option>
+                  <option v-for="person in persons" :key="person.id" :value="person.id">
+                    {{ person.nickname }}
+                  </option>
+                </select>
+                <select v-model="editForm.category" class="input min-w-0 flex-1">
+                  <option v-for="category in CATEGORIES" :key="category.value" :value="category.value">
+                    {{ category.label }}
+                  </option>
+                </select>
+              </div>
+              <div class="flex gap-2">
+                <button class="btn btn-primary" :disabled="busy !== null" @click="saveEdit(item.id)">
+                  保存并确认
+                </button>
+                <button class="btn btn-ghost" :disabled="busy !== null" @click="editingId = null">
+                  取消
+                </button>
+              </div>
+            </div>
+
             <div v-else class="flex gap-2">
               <button
                 class="btn btn-primary"
@@ -235,6 +316,13 @@ onMounted(async () => {
                 @click="rejectOne(item.id)"
               >
                 驳回
+              </button>
+              <button
+                class="btn btn-ghost"
+                :disabled="busy !== null"
+                @click="startEdit(item, group.person_id)"
+              >
+                改
               </button>
             </div>
           </div>

@@ -124,6 +124,17 @@ async def create_user(
     )
 
 
+async def _count_other_active_owners(session: AsyncSession, user_id: int) -> int:
+    """除指定账号外，还剩几个可用 owner。"""
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(User)
+            .where(User.role == "owner", User.is_active.is_(True), User.id != user_id)
+        )
+    ).scalar_one()
+
+
 @router.patch(
     "/{user_id}",
     response_model=DataResponse[UserOut],
@@ -154,6 +165,14 @@ async def update_user(
             ).scalar_one()
             if remaining == 0:
                 raise AppError(ErrorCode.INVALID_STATE, "不能禁用最后一个 owner", status_code=400)
+
+    if payload.role is not None and payload.role == "member" and user.role == "owner":
+        if await _count_other_active_owners(session, user_id) == 0:
+            raise AppError(
+                ErrorCode.INVALID_STATE,
+                "不能把最后一个 owner 改成 member",
+                status_code=400,
+            )
 
     if payload.display_name is not None:
         user.display_name = payload.display_name

@@ -14,6 +14,7 @@ frontend/dist/
 frontend/.vite/
 frontend/*.tsbuildinfo
 frontend/_tmp_*
+frontend/.openapi.tmp.json
 *.local
 
 # ---- 环境变量与密钥（绝不能提交）----

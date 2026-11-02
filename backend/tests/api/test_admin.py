@@ -11,6 +11,7 @@
 import httpx
 import pytest
 
+from app.api import admin as admin_api
 from tests.conftest import Account, create_user, csrf_headers, delete_users, login
 
 
@@ -56,3 +57,43 @@ async def test_create_user_with_password_succeeds(
     assert "password" not in data
 
     delete_users(data["id"])
+
+
+async def test_cannot_demote_last_owner_to_member(
+    client: httpx.AsyncClient, owner: Account, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """把"还有别的 owner"替换成 0，触发最后 owner 保护。
+
+    不真改现有 owner 行：测试库里有用户真实账号，负例用 monkeypatch 隔离。
+    """
+    async def no_other_owner(session, user_id: int) -> int:
+        return 0
+
+    monkeypatch.setattr(admin_api, "_count_other_active_owners", no_other_owner)
+    csrf_token = await login(client, owner)
+
+    response = await client.patch(
+        f"/api/admin/users/{owner.id}",
+        json={"role": "member"},
+        headers=csrf_headers(csrf_token),
+    )
+
+    assert response.status_code == 400
+    assert "最后一个 owner" in response.json()["error"]["message"]
+
+
+async def test_can_demote_owner_when_another_owner_exists(
+    client: httpx.AsyncClient, owner: Account
+) -> None:
+    other = create_user("o2", role="owner")
+    try:
+        csrf_token = await login(client, owner)
+        response = await client.patch(
+            f"/api/admin/users/{owner.id}",
+            json={"role": "member"},
+            headers=csrf_headers(csrf_token),
+        )
+        assert response.status_code == 200
+        assert response.json()["data"]["role"] == "member"
+    finally:
+        delete_users(other.id)

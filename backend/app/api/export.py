@@ -11,6 +11,7 @@ import csv
 import io
 import json
 import re
+import tempfile
 import zipfile
 from typing import Annotated, Any
 
@@ -18,6 +19,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.deps import CurrentUser, get_current_user, get_session
 from app.models.person import Person
@@ -45,43 +47,50 @@ async def export_all(
     stmt = select(Person).order_by(Person.id)
     persons = list((await session.execute(stmt)).scalars().all())
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-        index: list[dict[str, Any]] = []
-        for person in persons:
-            if person.id is None:
-                continue
-            data = await person_service.export_person(session, person.id)
+    # 超过 1MB 就落临时磁盘文件，不把整个 ZIP 堆在内存里。
+    # 响应结束后由 BackgroundTask 关文件；打包中途失败要在这里关掉，别留句柄。
+    buffer = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b")
+    try:
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+            index: list[dict[str, Any]] = []
+            for person in persons:
+                if person.id is None:
+                    continue
+                data = await person_service.export_person(session, person.id)
+                archive.writestr(
+                    f"persons/{person.id}-{safe_name(person.nickname)}.json",
+                    json.dumps(data, ensure_ascii=False, indent=2),
+                )
+                index.append(
+                    {
+                        "id": person.id,
+                        "nickname": person.nickname,
+                        "facts": len(data["facts"]),
+                        "ledger": len(data["ledger"]),
+                        "events": len(data["events"]),
+                        "tags": len(data["tags"]),
+                    }
+                )
+
+            csv_buffer = io.StringIO()
+            writer = csv.DictWriter(
+                csv_buffer, fieldnames=["id", "nickname", "facts", "ledger", "events", "tags"]
+            )
+            writer.writeheader()
+            writer.writerows(index)
+            archive.writestr("index.csv", csv_buffer.getvalue())
             archive.writestr(
-                f"persons/{person.id}-{safe_name(person.nickname)}.json",
-                json.dumps(data, ensure_ascii=False, indent=2),
-            )
-            index.append(
-                {
-                    "id": person.id,
-                    "nickname": person.nickname,
-                    "facts": len(data["facts"]),
-                    "ledger": len(data["ledger"]),
-                    "events": len(data["events"]),
-                    "tags": len(data["tags"]),
-                }
+                "README.txt",
+                "Keeper 全量导出。index.csv 是名单，persons/ 下是每个人的完整档案 JSON。\n",
             )
 
-        csv_buffer = io.StringIO()
-        writer = csv.DictWriter(
-            csv_buffer, fieldnames=["id", "nickname", "facts", "ledger", "events", "tags"]
+        buffer.seek(0)
+        return StreamingResponse(
+            buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="keeper-export.zip"'},
+            background=BackgroundTask(buffer.close),
         )
-        writer.writeheader()
-        writer.writerows(index)
-        archive.writestr("index.csv", csv_buffer.getvalue())
-        archive.writestr(
-            "README.txt",
-            "Keeper 全量导出。index.csv 是名单，persons/ 下是每个人的完整档案 JSON。\n",
-        )
-
-    buffer.seek(0)
-    return StreamingResponse(
-        buffer,
-        media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="keeper-export.zip"'},
-    )
+    except Exception:
+        buffer.close()
+        raise

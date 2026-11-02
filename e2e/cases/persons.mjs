@@ -13,6 +13,16 @@ export async function run({ page, config, shot }) {
   expect(count, '列表里至少应有一个种子人物').toBeGreaterThan(0)
   await shot('list')
 
+  // 标签筛选：种子数据只有「测试甲」带「偏好 · 白茶」
+  await page.selectOption('label:has-text("按标签筛") select', { label: '偏好 · 白茶' })
+  await page.waitForTimeout(500)
+  expect(await page.locator('a.card').count(), '筛标签后应只剩测试甲').toBe(1)
+  expect(await page.locator('a.card', { hasText: '测试甲' }).count(), '筛出的应是测试甲').toBe(1)
+  await shot('tag-filter')
+  await page.selectOption('label:has-text("按标签筛") select', '')
+  await page.waitForTimeout(500)
+  expect(await page.locator('a.card').count(), '取消筛选后应恢复全部').toBe(count)
+
   await page.locator('a.card', { hasText: '测试甲' }).first().click()
   await page.waitForURL(/\/persons\/\d+/, { timeout: 10_000 })
   await page.waitForTimeout(1000)

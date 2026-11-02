@@ -113,9 +113,9 @@ async def purge_business_data(user_id: int) -> None:
 
 
 async def seed(user_id: int) -> dict[str, int]:
-    """建人 + 关系 + 待办 + 事件。日期全部相对"今天"算，跨天跑不会失效。"""
+    """建人 + 关系 + 待办 + 事件 + 标签。日期全部相对"今天"算，跨天跑不会失效。"""
     today = local_today()
-    counts = {"persons": 0, "todos": 0, "events": 0}
+    counts = {"persons": 0, "todos": 0, "events": 0, "tags": 0}
 
     async with SessionLocal() as session:
         session.info["rls_user_id"] = user_id
@@ -136,6 +136,10 @@ async def seed(user_id: int) -> dict[str, int]:
             )
             person_ids.append(person.id)  # type: ignore[arg-type]
             counts["persons"] += 1
+
+        # 标签筛选用例靠它：只有「测试甲」带这个标签
+        session.add(Tag(user_id=user_id, person_id=person_ids[0], key="preference", value="白茶"))
+        counts["tags"] += 1
 
         for title, offset, _hint in TODOS:
             session.add(
@@ -186,7 +190,8 @@ async def main() -> int:
         counts = await seed(user.id)
         print(
             f"已写入：{counts['persons']} 人 / "
-            f"{counts['todos']} 条待办 / {counts['events']} 个事件"
+            f"{counts['todos']} 条待办 / {counts['events']} 个事件 / "
+            f"{counts['tags']} 个标签"
         )
         print(f"今天（业务时区）：{local_today()}")
 

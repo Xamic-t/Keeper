@@ -444,7 +444,7 @@ async def regenerate(session: AsyncSession, reminder_id: int) -> Reminder:
     if event is None:
         raise AppError(ErrorCode.NOT_FOUND, "这条提醒对应的事件已删除", status_code=404)
 
-    days_left = max((event.occurs_on - datetime.now(UTC).date()).days, 0)
+    days_left = max((event.occurs_on - local_today()).days, 0)
     if event.person_id is None:
         payload = _degraded_payload(event, days_left)
     else:

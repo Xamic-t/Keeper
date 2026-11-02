@@ -21,11 +21,9 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# 迁移优先用 owner 连接串
-config.set_main_option(
-    "sqlalchemy.url",
-    settings.database_url_migrate or settings.database_url,
-)
+# 迁移必须用 owner 连接串。运行时使用 keeper_app 是安全要求，
+# 但 keeper_app 没有 DDL 权限，不能拿来跑 migration。
+config.set_main_option("sqlalchemy.url", settings.database_url_migrate or settings.database_url)
 
 target_metadata = SQLModel.metadata
 

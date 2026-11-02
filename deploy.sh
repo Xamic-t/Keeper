@@ -21,7 +21,7 @@ if [ "${1:-}" = "--build" ]; then
   docker compose build --pull
 fi
 docker compose up -d db
-docker compose up -d --build app web
+docker compose up -d --build app scheduler web
 
 echo "==> 等待数据库就绪"
 for _ in $(seq 1 30); do

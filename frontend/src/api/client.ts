@@ -33,6 +33,9 @@ export interface Envelope<T> {
   meta?: Record<string, unknown>
 }
 
+/** 默认请求超时：同步抽取/导出可能慢，但后端挂起时前端不能无限转圈。 */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000
+
 /**
  * 401 的出口。
  *
@@ -74,6 +77,7 @@ async function request<T>(
     body?: unknown
     query?: Record<string, unknown>
     raw?: boolean
+    timeoutMs?: number
   } = {},
 ): Promise<T> {
   const method = (options.method ?? 'GET').toUpperCase()
@@ -92,12 +96,29 @@ async function request<T>(
     if (csrf) headers['X-CSRF-Token'] = csrf
   }
 
-  const response = await fetch(`/api${path}${buildQuery(options.query)}`, {
-    method,
-    headers,
-    body,
-    credentials: 'include',
-  })
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+  )
+
+  let response: Response
+  try {
+    response = await fetch(`/api${path}${buildQuery(options.query)}`, {
+      method,
+      headers,
+      body,
+      credentials: 'include',
+      signal: controller.signal,
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError(408, { code: 'REQUEST_TIMEOUT', message: '请求超时，请重试' })
+    }
+    throw err
+  } finally {
+    window.clearTimeout(timeoutId)
+  }
 
   if (response.status === 204) return undefined as T
 

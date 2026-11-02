@@ -2,8 +2,9 @@
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
-from pydantic import SecretStr
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根目录的 .env（backend/app/config.py → 上三层）
@@ -27,17 +28,24 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
 
     # ---- 数据库 ----
-    # 应用运行时使用：普通角色（NOSUPERUSER NOBYPASSRLS），受 RLS 约束
-    database_url: str = "postgresql+psycopg://keeper:keeper@localhost:5432/keeper"
-    # 迁移专用：owner 角色，需要 DDL 权限；未配置时回退到 database_url
+    # 应用运行时使用：普通角色（NOSUPERUSER NOBYPASSRLS），受 RLS 约束。
+    # 默认从 APP_DB_PASSWORD 拼 keeper_app；不要在这里写 owner 账号。
+    database_url: str | None = None
+    # 迁移专用：owner 角色，需要 DDL 权限；默认从 DB_PASSWORD 拼 keeper。
+    # compose 里必须显式覆盖成 db 主机名，见 docker-compose.yml 的 app.environment。
     database_url_migrate: str | None = None
+    # 建库 owner 密码（仅用于拼迁移连接串；compose 的 db 服务也读这个变量）
+    db_password: SecretStr = SecretStr("keeper")
+    # 应用连接角色 keeper_app 的密码
+    app_db_password: SecretStr = SecretStr("keeper")
     db_pool_size: int = 5
     db_max_overflow: int = 5
     # 打印 SQL（会带出插入的数据，默认关闭）
     db_echo: bool = False
 
     # ---- 安全 ----
-    secret_key: SecretStr = SecretStr("dev-only-secret-change-me")
+    # 会话签名密钥：没有默认值。忘了配会在启动时直接失败，而不是 silently 用弱密钥。
+    secret_key: SecretStr
     session_max_age: int = 604800  # 7 天，单位秒
     allow_registration: bool = False
     # 登录接口每 IP 每分钟允许的尝试次数（W3 起生效）
@@ -71,6 +79,25 @@ class Settings(BaseSettings):
     assistant_token: SecretStr | None = None
     # token 代表哪个账号的数据。单用户部署就是 owner 账号。
     assistant_username: str = "Admin"
+
+    @model_validator(mode="after")
+    def build_database_urls(self) -> "Settings":
+        """根据账号密码拼默认连接串。
+
+        显式设置 DATABASE_URL / DATABASE_URL_MIGRATE 时完全尊重显式值；
+        否则运行时默认 keeper_app（RLS 生效），迁移默认 keeper（有 DDL 权限）。
+        """
+        if self.database_url is None:
+            password = quote(self.app_db_password.get_secret_value(), safe="")
+            self.database_url = (
+                f"postgresql+psycopg://keeper_app:{password}@localhost:5432/keeper"
+            )
+        if self.database_url_migrate is None:
+            password = quote(self.db_password.get_secret_value(), safe="")
+            self.database_url_migrate = (
+                f"postgresql+psycopg://keeper:{password}@localhost:5432/keeper"
+            )
+        return self
 
     @property
     def is_dev(self) -> bool:

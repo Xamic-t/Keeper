@@ -34,6 +34,8 @@ services:
     environment:
       # 容器内连库用 db 这个主机名；应用必须用 keeper_app，不能用 owner
       DATABASE_URL: postgresql+psycopg://keeper_app:${APP_DB_PASSWORD}@db:5432/keeper
+      # 迁移走 owner；host 必须是 db，不能沿用 .env 里的 localhost
+      DATABASE_URL_MIGRATE: postgresql+psycopg://keeper:${DB_PASSWORD}@db:5432/keeper
       DATA_DIR: /app/data
     expose:
       - "8000"
@@ -47,6 +49,23 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # 每日任务（扫事件 → 生成提醒 → 推送 → 权重衰减）。第一价值，必须随部署启动。
+  # 单独容器而不是塞进 app：scheduler 崩了不影响 API，app 发布也不打断定时器。
+  scheduler:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./backend/prompts:/app/prompts:ro
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://keeper_app:${APP_DB_PASSWORD}@db:5432/keeper
+      DATA_DIR: /app/data
+    command: ["uv", "run", "python", "-m", "app.jobs.daily", "--serve"]
+    restart: unless-stopped
 
   web:
     build: ./frontend

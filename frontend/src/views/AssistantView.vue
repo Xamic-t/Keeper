@@ -11,8 +11,9 @@
  *    dsh 用 `?token=...` 里的启动令牌换 cookie，令牌每次启动都不一样
  *  · 还有可能被 X-Frame-Options 拦住，iframe 里一片白
  *
- * 所以：要求用户把 dsh 打印出来的那条带 token 的地址粘一次，存在本地；
+ * 所以：要求用户把 dsh 打印出来的那条带 token 的地址粘一次，存在当前标签页 sessionStorage；
  * 没粘过就明确说"去启动、去复制"，而不是给一块 401 白板。
+ * 不用 localStorage：token 是凭据，关闭标签页就清掉，能少一个长期泄露面。
  */
 
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
@@ -22,7 +23,7 @@ import PageHeader from '@/components/PageHeader.vue'
 const STORAGE_KEY = 'keeper.harness.url'
 const defaultUrl = import.meta.env.VITE_HARNESS_URL ?? 'http://127.0.0.1:3080'
 
-const savedUrl = ref(localStorage.getItem(STORAGE_KEY) ?? '')
+const savedUrl = ref(sessionStorage.getItem(STORAGE_KEY) ?? '')
 const inputUrl = ref(savedUrl.value || defaultUrl)
 const loaded = ref(false)
 const unreachable = ref(false)
@@ -66,7 +67,7 @@ function onLoad() {
 function saveUrl() {
   const value = inputUrl.value.trim()
   if (!value) return
-  localStorage.setItem(STORAGE_KEY, value)
+  sessionStorage.setItem(STORAGE_KEY, value)
   savedUrl.value = value
   saved.value = true
   loaded.value = false
@@ -74,7 +75,7 @@ function saveUrl() {
 }
 
 function forget() {
-  localStorage.removeItem(STORAGE_KEY)
+  sessionStorage.removeItem(STORAGE_KEY)
   savedUrl.value = ''
   saved.value = false
   inputUrl.value = defaultUrl
@@ -124,7 +125,7 @@ onBeforeUnmount(() => window.clearTimeout(timer))
           <code class="rounded bg-bg-alt px-1 text-xs">cd harness &amp;&amp; ./run.sh</code>
         </li>
         <li>复制它打印的 <code class="rounded bg-bg-alt px-1 text-xs">http://127.0.0.1:3080/?token=...</code></li>
-        <li>粘到下面，只在这个浏览器里记住</li>
+        <li>粘到下面，只在这个标签页里记住（关闭标签页即清除）</li>
       </ol>
 
       <input
