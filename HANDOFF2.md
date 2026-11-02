@@ -14,7 +14,7 @@
 > 进度：**W1–W16 主体完成**。剩：W13-A 30 张截图规模验收、W14-A 真机收到推送、W14-B 部署。
 >
 > 部署前必须处理（2026-11-02 评审 debug 发现）：`.env` 的 `SECRET_KEY` 还不够强（生产会拒启动）；
-> `APP_DB_PASSWORD` 未设置（compose 已警告）。详见 `docs/24-评审问题debug报告.md` 第八节。
+> `APP_DB_PASSWORD` 未设置（compose 已警告）。详见 `docs/24-评审问题debug报告.md` 第九节。
 
 ---
 
