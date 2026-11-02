@@ -6,7 +6,7 @@
 >
 > **本文的效力**：新增依赖、调整目录、自定义错误码、更换框架——**都必须先改本文，写明原因，再动代码。**
 >
-> 版本：v2.3 · 2026-10-28
+> 版本：v2.4 · 2026-11-02
 
 ---
 
@@ -77,7 +77,10 @@
 | **提醒** | 日期驱动 + AI 建议（带依据）+ 话术 | V1 |
 | **待办** | 固定模板 + AI 生成 | V1 |
 | **今日** | 一屏看全今天该做什么 | V1 |
-| **助理** | 对话式投喂 + 查询 | V1 基础 / V2 完整 |
+| **设置** | 原图保留开关 / 推送通道 / 改密码 | V1 |
+| **导出** | 全量 ZIP + 单人 JSON | V1 |
+| **管理** | owner 建号 / 禁用 / 重置密码 | V1 后端（无前端） |
+| **助理** | 对话式投喂 + 查询（Harness 侧车） | V1 基础 / V2 完整 |
 | **关系温度** | 五维打分驱动活跃窗口 | V2 |
 | **需求感知** | 温度 × 场景的 2×2 判断 | V2 |
 | **对话式问答** | 混合检索路由 | V2 |
@@ -90,7 +93,7 @@
 | 全自动归档（AI 抽完直接落库） | 抽错了你不知道，比没系统更糟 |
 | AI 替我聊天 | 只帮记和提醒，说话的还是人 |
 | 团队协作（多人共享客户库） | 多用户是"每人独立空间"，不是共享 |
-| 原生 App / 小程序 | 响应式 Web + PWA 够用 |
+| 原生 App / 小程序 | 响应式 Web 够用；V1 连 PWA/离线缓存都不做（离线回放是 V2，见 docs/02） |
 | 做平台 / 做社区 | 一个极锋利的个人工具，比平庸平台有价值 |
 
 ---
@@ -102,7 +105,7 @@
 ```
 ┌──────────────────────────────────────────────────┐
 │  浏览器（手机 / 电脑）                              │
-│  Vue 3 SPA + Tailwind + PWA                      │
+│  Vue 3 SPA + Tailwind                             │
 └────────────────────┬─────────────────────────────┘
                      │ /api/*  JSON
 ┌────────────────────┴─────────────────────────────┐
@@ -110,21 +113,39 @@
 └────────────────────┬─────────────────────────────┘
                      │
 ┌────────────────────┴─────────────────────────────┐
-│  Uvicorn + FastAPI（单进程）                       │
+│  Uvicorn + FastAPI（API 容器）                     │
 │  ├── api/      路由（薄）                          │
 │  ├── services/ 业务逻辑（不 import fastapi）        │
 │  ├── models/   SQLModel 表定义                     │
-│  ├── core/     安全、错误、日志                     │
-│  └── jobs/     APScheduler 定时任务                │
+│  └── core/     安全、错误、日志                     │
 ├──────────────────────────────────────────────────┤
-│  PostgreSQL 17 + pgvector（RLS 行级隔离）          │
+│  Scheduler（同一镜像的独立容器）                    │
+│  └── jobs/daily.py --serve（APScheduler 08:00）    │
+├──────────────────────────────────────────────────┤
+│  PostgreSQL 17（RLS 行级隔离）                     │
 │  data/uploads/  截图原图                           │
 └──────────────────────────────────────────────────┘
                      │
         企业微信 webhook → PushPlus（降级）
+
+可选侧车：Harness（Node 容器，dsh Web UI + 5 个只读 API），
+         独立进程，挂了不影响主流程（见 19.7）。
 ```
 
-**一句话**：一个 Python API + 一个 Vue 静态包 + 一个 Postgres 实例。
+**一句话**：一个 Python API + 一个定时任务进程 + 一个 Vue 静态包 + 一个 Postgres 实例；Harness 是可选侧车。
+
+### 6.1 进程与故障边界（2026-11-02 起）
+
+| 进程 / 容器 | 起什么 | 挂了会怎样 | 为什么这样切 |
+|---|---|---|---|
+| `app` | Uvicorn + FastAPI | 页面和接口全部 502 | 主服务 |
+| `scheduler` | `python -m app.jobs.daily --serve`（每日 08:00） | 当天不生成/不推送提醒；可手动 `uv run python -m app.jobs.daily` 补跑 | **不让定时任务拖垮 API**；API 发布也不会打断定时器 |
+| `web` | Caddy：静态文件 + 反代 `/api` | 全站打不开（但 API 还活着） | HTTPS 与静态托管分离 |
+| `db` | PostgreSQL 17 | 全站不可用 | 唯一业务真相源，备份优先级最高 |
+| `harness`（可选 profile） | Node + dsh Web UI | 助理页打不开；投喂/提醒/待办不受影响 | developer preview，必须可随时拆 |
+
+**部署脚本契约**：`deploy.sh` 必须同时起 `app` + `scheduler` + `web`；只起 API 视为部署不完整。
+**本地开发**：`./dev.sh` 默认起 scheduler；调接口不想被写库干扰时用 `./dev.sh --no-scheduler`。
 
 ---
 
@@ -142,7 +163,7 @@
 | 框架 | **FastAPI** | 最新稳定 |
 | ORM | **SQLModel** | 最新稳定 |
 | 迁移 | **Alembic** | 最新稳定 |
-| 数据库 | **PostgreSQL + pgvector** | 17 / 0.8+ |
+| 数据库 | **PostgreSQL**（镜像带 pgvector，V1 不启用向量检索） | 17 / 0.8+ |
 | 定时任务 | **APScheduler** | 3.x |
 | 模型 | DeepSeek `deepseek-flash`（主）→ 通义 `qwen-vl-max`（备） | — |
 
@@ -228,7 +249,7 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 
 | 能力 | 库 | 用在哪 |
 |---|---|---|
-| ORM | SQLModel | 15 张表的定义与查询 |
+| ORM | SQLModel | 13 张 V1 表的定义与查询（V2 三张未建，见 19.3） |
 | 迁移 | Alembic | 建表、改表 |
 | 配置 | pydantic-settings | 读 `.env` |
 | 密码哈希 | argon2-cffi | 登录 |
@@ -239,7 +260,7 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 | 模型 SDK | openai（官方 Python SDK） | DeepSeek 兼容 OpenAI 格式 |
 | 农历 | lunar-python + chinesecalendar | 农历生日、法定节假日 |
 | 重复规则 | python-dateutil | 日历事件的 `rrule` 展开（`rrulestr`） |
-| 向量 | pgvector（SQLAlchemy 扩展） | V2 的 RAG |
+| 向量 | pgvector（SQLAlchemy 扩展） | V2 的 RAG；V1 未建 `vector_chunks`，也未装 pgvector Python 扩展 |
 
 **明确不用**：Redis、Celery、Django、Flask、Nginx、Kubernetes、GraphQL。
 
@@ -251,10 +272,12 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 |---|---|---|---|---|
 | 框架 | `vue` | 3.5.x | 全部页面 | — |
 | 状态 | `pinia` | 2.x | 登录态（`stores/auth.ts`）、日历数据（`stores/calendar.ts`） | 跨视图共享状态要靠 prop 层层传 |
-| 路由 | `vue-router` | 4.x | 九个页面 + 底部 tab | 手写 hash 路由 |
+| 路由 | `vue-router` | 4.x | 全部页面（今日/投喂/人/确认/日历/待办/设置/登录/助理） | 手写 hash 路由 |
 | 样式 | `tailwindcss` + `@tailwindcss/vite` | 4.x | 全部 | 手写 CSS，且 token 无法集中管理 |
 | 构建 | `vite` | 6.x | dev server / 打包 | — |
-| 类型 | `vue-tsc`、`openapi-typescript` | 2.x / 7.x | 类型检查、从 `/openapi.json` 生成类型 | 前后端字段漂移只能运行时发现 |
+| 类型 | `vue-tsc`、`openapi-typescript` | 2.x / 7.x | 类型检查、`npm run gen:types` 从后端代码导出 `schema.d.ts` | 前后端字段漂移只能运行时发现 |
+| 前端单测 | `vitest` + `happy-dom` | 5.x / 21.x | `npm test`：client 契约、calendar store | 交互回归只能手工点 |
+| 端到端 | `playwright`（根目录 `e2e/`，不放进前端依赖） | 1.x | 真浏览器 8 条用例 | 只能靠人工验收 |
 
 **唯一的"大件"依赖：日历网格**
 
@@ -291,9 +314,13 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 |---|---|---|
 | **ruff format** | 格式化 | 保存 / commit 前 |
 | **ruff check** | Lint（含 import 排序、未使用变量） | commit 前 |
-| **pytest** | 测试 | 每次改 service 后 |
+| **pytest** | 后端单测 + 接口测试 | 每次改 service / api 后 |
+| **pytest-cov** | 后端覆盖率（`--cov=app`） | 交付前 / 改动安全与隔离后 |
+| **Vitest** | 前端 store / API client 单测 | 改 `frontend/src` 逻辑后 |
+| **Playwright** | 真浏览器 E2E（`e2e/`） | 交付前 / 改交互后 |
 
 **规则：不允许手工调缩进和对齐。** 格式不一致 = 没跑 ruff。
+**测试规则**：新增 API 至少有一条 HTTP 层用例；新增 store 逻辑至少有一条 Vitest 用例；改核心交互同步 e2e。
 
 ### 8.2 类型注解（强制）
 
@@ -408,6 +435,21 @@ from app.services.profile import rewrite_summary
 | 硬编码密钥、密码、路径 | 走 `.env` |
 | 在 model 里写数据库查询 | 违反分层（见 11.2） |
 | 用 `time.sleep()` 等异步结果 | 阻塞事件循环 |
+
+### 8.11 测试分层（2026-11-02 定）
+
+| 层 | 工具 | 放哪 | 管什么 | 不做什么 |
+|---|---|---|---|---|
+| service 单测 | pytest | `backend/tests/services/` | 业务规则、边界、幂等 | 不测 HTTP 状态码 |
+| API 契约 | pytest + httpx ASGI | `backend/tests/api/` | 状态码、响应字段、RLS、CSRF | 不重复 service 细分支 |
+| 前端单测 | Vitest + happy-dom | `frontend/src/**/*.test.ts` | client 契约、Pinia store | 不做整页快照 |
+| E2E | Playwright | `e2e/cases/` | 真交互：登录、拖拽、投喂、勾选 | 不碰真实用户数据 |
+
+**硬规则**：
+1. API 新增/改响应，必须同步 `tests/api/`；只改 service 测试不算覆盖契约。
+2. 前端 store/client 逻辑改动，必须有一条 Vitest；纯样式改动不强制。
+3. E2E 只使用隔离账号，先跑 `backend/scripts/seed_e2e.py`；失败截图要清掉再重跑。
+4. 覆盖率是**发现盲区**的工具，不是 KPI；当前基线 80%，见 `docs/25`。
 
 ---
 
@@ -561,22 +603,24 @@ backend/
 
 | 目录 / 文件 | 主要职责 | 以后应该放什么 | 禁止放什么 | 对应的框架机制 | 示例文件 | 来源 |
 |---|---|---|---|---|---|---|
-| `app/main.py` | 应用入口 | `lifespan`、中间件、CORS、异常处理器注册、`include_router` | 任何路由函数、任何业务逻辑、任何数据库查询 | `FastAPI()`、`@app.middleware`、`include_router` | `main.py`（99 行） | 【框架】 |
-| `app/config.py` | 读配置 | 所有环境变量字段 + 默认值 + 校验 | 业务常量（如预算档位）、密钥明文 | `pydantic-settings.BaseSettings` | `config.py`（65 行） | 【项目】 |
-| `app/db.py` | 数据库连接 | 引擎、`SessionLocal`、连接池参数、连通性探测 | 查询语句、表定义、业务逻辑 | SQLAlchemy `create_async_engine` / `async_sessionmaker` | `db.py`（49 行） | 【项目】 |
-| `app/deps.py` | 请求级依赖 | **只放骨架**：认证入口、RLS 会话开关 | 功能专用工具（分页、角色校验、raw session），等有调用者再加（见 19.6） | FastAPI `Depends` + `yield` 依赖 | `deps.py`（63 行） | 【框架】<br>（官方叫 `dependencies.py`） |
-| `app/core/errors.py` | 错误体系 | `AppError`、`ErrorCode` 枚举、全局异常处理器 | 具体业务错误文案、SQL | `@app.exception_handler` | `errors.py`（99 行） | 【项目】 |
-| `app/core/logging.py` | 日志体系 | `JsonFormatter`、`setup_logging` | 业务日志调用（应在各处 `logger.info`） | 标准库 `logging` | `logging.py`（53 行） | 【项目】 |
-| `app/core/response.py` | 响应包装 | `ok()`（分页等真有调用者时再加） | 具体接口的字段定义 | 无（纯工具函数） | `response.py`（15 行） | 【项目】 |
-| `app/core/security.py` | 安全原语 | argon2 哈希、cookie 签发、CSRF token | 登录流程编排（属 service） | 无（`argon2-cffi` / `itsdangerous`） | ⚠️ 未创建 | 【项目】 |
-| `app/api/router.py` | 路由汇总 | 每个模块一行 `include_router` | 任何路由函数本体 | `APIRouter(prefix="/api")` | `router.py`（15 行） | 【框架】 |
-| `app/api/*.py` | 路由层 | 一个业务模块一个文件：取参数、调 service、返回；**该模块的请求/响应模型** | 数据库查询、业务判断、模型调用、超过 30 行的函数 | `APIRouter`、`response_model`、`Depends` | `api/health.py`（35 行） | 【框架】 |
-| `app/models/` | 表定义 | SQLModel 类：字段、约束、关系、`__tablename__` | 任何 `select()` / `session.exec()`、业务方法 | SQLModel / SQLAlchemy 2.0 | ⚠️ 待填（12 张表） | 【项目】 |
-| `app/services/` | 业务逻辑 | 一条业务主线的完整实现，可脱离 HTTP 单测 | `from fastapi import Request`、`JSONResponse` | 无（纯 Python，方便 pytest） | ⚠️ 待填 | 【项目】 |
-| `app/jobs/` | 定时任务 | 任务入口函数，内部调 service | 业务逻辑（应下沉到 service） | `APScheduler` | ⚠️ 待填（每日扫事件） | 【项目】 |
-| `alembic/versions/` | 迁移脚本 | 每个版本一个文件，顶部写清对应文档与回滚影响 | 手工改库留下的临时 SQL | Alembic | ⚠️ 待填（`0001_initial_schema`） | 【工具】 |
-| `prompts/` | 提示词 | 带版本号的 prompt 文件（`v1_extract.md`） | prompt 字符串常量散落在代码里 | 无 | ⚠️ 待填 | 【项目】 |
-| `tests/` | 测试 | `tests/services/` 单测、`tests/api/` 接口测试 | 依赖真实网络的测试 | `pytest` + `TestClient` | `test_health.py`（40 行） | 【工具】 |
+| `app/main.py` | 应用入口 | `lifespan`、中间件、CORS、异常处理器注册、`include_router` | 任何路由函数、任何业务逻辑、任何数据库查询 | `FastAPI()`、`@app.middleware`、`include_router` | `main.py`（139 行） | 【框架】 |
+| `app/config.py` | 读配置 | 所有环境变量字段 + 默认值 + 校验 | 业务常量（如预算档位）、密钥明文 | `pydantic-settings.BaseSettings` | `config.py`（114 行） | 【项目】 |
+| `app/db.py` | 数据库连接 | 引擎、`SessionLocal`、连接池参数、连通性探测 | 查询语句、表定义、业务逻辑 | SQLAlchemy `create_async_engine` / `async_sessionmaker` | `db.py`（74 行） | 【项目】 |
+| `app/deps.py` | 请求级依赖 | 认证入口、RLS 会话开关、CSRF、分页、owner 校验 | 业务规则 | FastAPI `Depends` + `yield` 依赖 | `deps.py`（143 行） | 【框架】<br>（官方叫 `dependencies.py`） |
+| `app/core/errors.py` | 错误体系 | `AppError`、`ErrorCode` 枚举、全局异常处理器 | 具体业务错误文案、SQL | `@app.exception_handler` | `errors.py`（132 行） | 【项目】 |
+| `app/core/logging.py` | 日志体系 | `JsonFormatter`、`setup_logging` | 业务日志调用（应在各处 `logger.info`） | 标准库 `logging` | `logging.py`（以文件为准） | 【项目】 |
+| `app/core/response.py` | 响应包装 | `ok()`（分页等真有调用者时再加） | 具体接口的字段定义 | 无（纯工具函数） | `response.py`（以文件为准） | 【项目】 |
+| `app/core/security.py` | 安全原语 | argon2 哈希、cookie 签发、CSRF token | 登录流程编排（属 service） | 无（`argon2-cffi` / `itsdangerous`） | `security.py`（98 行） | 【项目】 |
+| `app/api/router.py` | 路由汇总 | 每个模块一行 `include_router` | 任何路由函数本体 | `APIRouter(prefix="/api")` | `router.py`（45 行） | 【框架】 |
+| `app/api/*.py` | 路由层 | 一个业务模块一个文件：取参数、调 service、返回；**该模块的请求/响应模型** | 数据库查询、业务判断、模型调用、超过 30 行的函数 | `APIRouter`、`response_model`、`Depends` | `api/health.py`（35 行，规模参考） | 【框架】 |
+| `app/models/` | 表定义 | SQLModel 类：字段、约束、关系、`__tablename__` | 任何 `select()` / `session.exec()`、业务方法 | SQLModel / SQLAlchemy 2.0 | 13 张 V1 表（见 `models/__init__.py`） | 【项目】 |
+| `app/services/` | 业务逻辑 | 一条业务主线的完整实现，可脱离 HTTP 单测 | `from fastapi import Request`、`JSONResponse` | 无（纯 Python，方便 pytest） | `services/person.py`、`services/reminder.py` | 【项目】 |
+| `app/jobs/` | 定时任务 | 任务入口函数，内部调 service | 业务逻辑（应下沉到 service） | `APScheduler` | `jobs/daily.py`（`--serve` 常驻 + 单次） | 【项目】 |
+| `alembic/versions/` | 迁移脚本 | 每个版本一个文件，顶部写清对应文档与回滚影响 | 手工改库留下的临时 SQL | Alembic | `alembic/versions/0001–0006` | 【工具】 |
+| `prompts/` | 提示词 | 带版本号的 prompt 文件（`v1_extract.md`） | prompt 字符串常量散落在代码里 | 无 | `prompts/v1_extract.md`、`v2_extract.md` | 【项目】 |
+| `tests/` | 测试 | `tests/services/` 单测、`tests/api/` 接口测试 | 依赖真实网络的测试 | `pytest` + `TestClient` | `tests/services/`、`tests/api/`（当前 198 条，见 `docs/25`） | 【工具】 |
+
+> 行数只作规模参考，**以文件为准**；接口/表数量也不要手抄进新文档，统一指向 `docs/06`、`docs/07` 或 OpenAPI。
 
 ### 11.3.1 请求/响应模型放哪（一个待定项）
 
@@ -607,7 +651,7 @@ HTTP 请求
 ③ 权限校验 ────────────── app/deps.py（通过 Depends 注入）
    │                       · get_current_user   → 认证，失败 401
    │                       · get_session        → SET LOCAL app.user_id，RLS 生效
-   │                       · （角色校验：待 admin 接口出现时再加，见 19.6）
+   │                       · require_owner     → 管理接口角色校验，失败 403
    ▼
 ④ 业务规则 ────────────── app/services/xxx.py
    │                       · 业务判断、状态流转、调外部 API
@@ -636,7 +680,7 @@ HTTP 请求
 | **数据库访问在哪？** | 引擎在 `db.py`，session 在 `deps.py` 注入，**查询在 `services/`** | `app/db.py`<br>`app/deps.py`<br>`app/services/` | SQLAlchemy 引擎 + FastAPI `Depends` + `SET LOCAL` |
 | **参数校验在哪？** | 路由函数签名上的 Pydantic 模型，**框架自动执行** | `app/api/*.py`（模型定义在同文件） | Pydantic v2 + FastAPI 自动绑定 |
 | **错误处理在哪？** | 四个全局处理器集中在 `core/errors.py`，在 `main.py` 注册 | `app/core/errors.py` | `@app.exception_handler` |
-| **权限校验入口在哪？** | 两层已实现（认证 + RLS），第三层待 admin 接口；全部在 `deps.py`，通过路由的 `Depends()` 挂载 | `app/deps.py` | FastAPI `Depends` + PostgreSQL RLS |
+| **权限校验入口在哪？** | 三层全部在 `deps.py`：认证、RLS、owner 校验；通过路由的 `Depends()` 挂载 | `app/deps.py` | FastAPI `Depends` + PostgreSQL RLS |
 
 #### 三层权限的分工（再强调一次）
 
@@ -644,7 +688,7 @@ HTTP 请求
 |---|---|---|
 | ① 认证 | `get_current_user` | 401 `UNAUTHENTICATED` |
 | ② 数据隔离 | `get_session` 的 `SET LOCAL` + **数据库 RLS** | 查不到 → **404**（不是 403） |
-| ③ 功能权限 | 待实现（当前无 admin 路由，见 19.6） | 403 `FORBIDDEN` |
+| ③ 功能权限 | `deps.require_owner`（`/api/admin/*`） | 403 `FORBIDDEN` |
 
 ---
 
@@ -814,7 +858,7 @@ def _inject_rls_user_id(session, transaction, connection) -> None:
 |---|---|---|---|
 | **① 认证** | `deps.get_current_user` | 有没有登录 | 401 |
 | **② 数据隔离** | `deps.get_session` 里的 `SET LOCAL` + 数据库 RLS | 能不能看别人的数据 | 查不到 → 404 |
-| **③ 功能权限** | 待实现（当前无 admin 路由，按 19.6 不预留） | 能不能用这个功能 | 403 |
+| **③ 功能权限** | `deps.require_owner` | 能不能用这个功能 | 403 |
 
 **用法**：
 
@@ -824,9 +868,9 @@ def _inject_rls_user_id(session, transaction, connection) -> None:
 async def get_person(pid: int, session: Session = Depends(get_session)):
     ...
 
-# 管理员路由：等第一个 admin 接口出现时，再实现 require_owner（见 19.6）
-# @router.post("/users")
-# async def create_user(..., _: User = Depends(require_owner)):
+# 管理员路由：require_owner 已实现，见 api/admin.py
+@router.post("/users")
+async def create_user(..., _: User = Depends(require_owner)):
 ```
 
 ### 15.4 每个请求的执行顺序
@@ -952,6 +996,9 @@ async def get_person(pid: int, session: Session = Depends(get_session)):
 | 5 | 会话用 httpOnly cookie，不用 JWT 存 localStorage |
 | 6 | 文件按 `uploads/{user_id}/` 分目录 |
 | 7 | 删除一个人 = 真删 + 级联 + 删文件（用户要求"不留痕"） |
+| 8 | `SECRET_KEY` 无默认值；生产弱于 32 字符或命中占位词直接拒启动 |
+| 9 | 启动时查 `pg_roles`：当前连接角色是 superuser/BYPASSRLS 时，dev 告警、prod 拒启动 |
+| 10 | 助理 token 只放 `sessionStorage`，不进 `localStorage`；关闭标签页即清 |
 
 ---
 
@@ -997,27 +1044,31 @@ async def get_person(pid: int, session: Session = Depends(get_session)):
 | **Vue 3 + TypeScript** | ❌ 不过度 | 产品负责人指定；学习成本靠类型生成抵消 | 保留 |
 | **FullCalendar 6.x** | ⚠️ 体积偏大（约 250KB gzip） | 但它是唯一"不写就做不完"的前端库：月网格 + 拖拽 + 翻月。§10.1 已明确这块自己写不出来 | 保留，见 7.6.1 |
 
-### 19.3 三处可以减负（建议）
+### 19.3 三处减负（已执行，2026-11-02 校正）
 
-| 项 | 现状 | 建议 | 收益 |
+| 项 | 现状 | 决定 | 结果 |
 |---|---|---|---|
-| `vector_chunks` 表 | W1 就建 | **推迟到 V2** | W1 建表从 15 张降到 12 张 |
-| `temperature_snapshots` 表 | W1 就建 | **推迟到 V2** | 同上 |
-| `agent_runs` 表 | 已标注 V2 | 保持 | — |
+| `vector_chunks` 表 | **未建** | 推迟到 V2 | V1 少一张空表 |
+| `temperature_snapshots` 表 | **未建** | 推迟到 V2 | 同上 |
+| `agent_runs` 表 | **未建** | 推迟到 V2 | 同上 |
 
-**理由**：这三张表 V1 一行数据都不会写。
+**结论**：V1 实际 **13 张表**（11 个业务对象 + `extraction_logs` + `notification_channels`），
+不是早期文档写的 15 张。字段清单以 `docs/06` 和 `backend/app/models/` 为准。
+
+**理由**：这三张表 V1 一行数据都不会写；建了只会让迁移、RLS、备份多三份维护成本。
 
 ### 19.4 真正的风险不是"过度"，是"组件多"
 
-这套栈单个组件都不高级，但**要同时跑起来的东西有 5 个**：
+这套栈单个组件都不高级，但**要同时跑起来的东西有 6 个**（Harness 另算可选）：
 
 ```
-前端构建产物 · 后端进程 · 数据库 · 反向代理 · 容器编排
+前端构建产物 · API 进程 · Scheduler 进程 · 数据库 · 反向代理 · 容器编排
 ```
 
-**一个人维护 5 个组件，出问题时定位成本是指数的。**
+**一个人维护 6 个组件，出问题时定位成本是指数的。**
+Scheduler 单独容器是刻意选择：它崩了不影响 API，API 发布也不打断定时任务；代价是多一个要看的进程。
 
-三条对策：一条命令起全栈 / 一个 `/api/health` 查全部 / 日志集中看。
+三条对策：一条命令起全栈 / 一个 `/api/health` 查 API / `docker compose logs` 按服务看日志。
 
 ### 19.5 结论
 
@@ -1075,7 +1126,7 @@ async def get_person(pid: int, session: Session = Depends(get_session)):
 | 定义 | **每个业务路由都必须经过** | 某个功能专用 |
 | 例子 | 认证入口、RLS 会话开关 | 分页、角色校验、raw session |
 | 零调用时 | **保留**——删了架构不成立 | **删除**——等有调用者再加 |
-| 当前保留 | `get_current_user`、`get_session` | 全部删除 |
+| 当前保留 | `get_current_user`、`get_session` | 见 19.6.7：`require_owner`、`Pagination`、`require_csrf` 等都有真实调用者 |
 
 #### 19.6.5 已经因此被删掉的（记录在案）
 
@@ -1084,7 +1135,7 @@ async def get_person(pid: int, session: Session = Depends(get_session)):
 | `get_raw_session` | 零调用；注释说给健康检查用，实际 health 走 `engine.connect()` | W2 写登录时 |
 | `get_pagination` + `Pagination` | 零调用 | 第一个列表接口 |
 | `paginated()` | 零调用 | 第一个列表接口 |
-| `require_owner` | 零调用（还没有 admin 路由） | 第一个 admin 接口 |
+| `require_owner` | 零调用（当时还没有 admin 路由） | 第一个 admin 接口（已于 W3 加回，见 19.6.7） |
 
 **加回来都是 5-10 行的事**，但那一刻它会有真实调用者，能被验证。
 
@@ -1224,7 +1275,7 @@ Python 从 Postgres 读
 | 子 Agent 编排 | ❌ | 一个助理够了，多 Agent 只会更难调试 |
 | 沙箱 / 文件系统 | ❌ | 助理不需要读写文件，开了就是风险面 |
 | 代码执行 | ❌ | 不需要，且危险 |
-| 自带 Web UI | ❌ | 我们有自己的 Vue 前端 |
+| 自带 Web UI | ✅（嵌入） | `/assistant` 用 iframe 嵌 dsh Web UI；启动地址带 `?token=`，只存当前标签页 `sessionStorage`，服务没起时显示启动命令 |
 | 四种预设模式 | 选 **minimal** | 工具少、行为可预测 |
 
 #### 19.7.7 架构影响清单
@@ -1247,7 +1298,7 @@ Python 从 Postgres 读
 第 3 步 · 接主服务：抽出 5 个只读接口（persons / persons/{id} / facts / ledger 汇总 / today）
             docker-compose 加 harness 侧车容器，工具里用容器主机名 app:8000
 第 4 步 · 装进 profile：dsh plugin add 把工具插件装成组合包，配进 profile
-第 5 步 · 前端加"助理"入口（第四屏或浮动按钮）
+第 5 步 · 前端加"助理"入口：`/assistant` 已落地（2026-11-02），嵌 dsh Web UI
 第 6 步 · 灰度：先只给自己用一周，再放开
 ```
 
@@ -1266,7 +1317,7 @@ Python 从 Postgres 读
 
 # 第三部分 · 文档地图
 
-## 20. 八份文档各自管什么
+## 20. 核心文档各自管什么
 
 | 文档 | 管什么 | 什么时候读 |
 |---|---|---|
@@ -1275,9 +1326,15 @@ Python 从 Postgres 读
 | [`02-产品设计`](./02-产品设计.md) | 界面、流程、功能清单、版本范围 | 写页面前 |
 | [`03-数据与技术`](./03-数据与技术.md) | AI 链路、温度模型、可解释性 | 写 AI 相关逻辑前 |
 | [`05-产品形态与技术栈`](./05-产品形态与技术栈.md) | 唯一技术方案、选型理由 | 开工前、换栈时 |
-| [`06-数据库设计`](./06-数据库设计.md) | 15 张表的字段、约束、索引、范式校验 | **改表前必读** |
-| [`07-后端设计`](./07-后端设计.md) | 45 个 API、认证、校验、异常、降级 | **写后端前必读** |
+| [`06-数据库设计`](./06-数据库设计.md) | **V1 13 张表**的字段、约束、索引、范式校验 | **改表前必读** |
+| [`07-后端设计`](./07-后端设计.md) | 接口总表、认证、校验、异常、降级；**数量以代码/OpenAPI 为准** | **写后端前必读** |
 | [`04-计划与验收`](./04-计划与验收.md) | 里程碑、四层验收、止损信号 | 每周对照 |
+
+**交付与证据（按时间倒序）**：
+- `docs/25-测试补齐报告.md`：198 pytest / 9 Vitest / e2e 8-8 / 覆盖率 80%
+- `docs/24-评审问题debug报告.md`：P0/P1/P2 逐条处置
+- `docs/23-夜间开发报告.md`：B0–B10 批次
+- `docs/21-剩余清债与业务时区.md`、`docs/22-Harness接入记录.md`
 
 **补充材料**：`docs/design/` 是五版界面样张（v4 定稿前的探索），`.impeccable.md` 是设计上下文。
 
@@ -1299,6 +1356,9 @@ Python 从 Postgres 读
 | 调整目录 | 先改本文第 11 节，写明原因 |
 | 自定义错误码 | 先改 `core/errors.py` + 07 的 4.3 节 |
 | 更换框架 | 先改本文第 7 节，写明原因 |
+| **调整部署拓扑**（新增容器/进程） | 先改本文第 6 节 + `docker-compose.yml` + `deploy.sh`，写清故障隔离关系 |
+| **改数据库连接角色** | 先改本文 17 节 + `.env.example`，同时验证 RLS 用例仍绿 |
+| **新增测试依赖** | 先改本文 7.6.1 / 8.1，说明它替代了什么人工验收 |
 
 **允许换栈的理由**：安全漏洞无补丁 / 核心依赖停止维护 / 已确认的性能瓶颈。
 **不允许的理由**："看起来更先进" / "网上说那个更快" / "想试试新技术"。
@@ -1309,9 +1369,13 @@ Python 从 Postgres 读
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
-| 2026-10-28 | v1.0 | 首版：业务边界 + 工程规则 |
+| 2026-11-02 | v2.4 | 同步交付后架构：① 第 6 节部署拓扑改为 API + Scheduler 双进程 + 可选 Harness 侧车；② 7.6/19.3 校正 V1 为 13 张表、pgvector V1 未启用；③ 7.6.1/8.1 补 Vitest / Playwright / pytest-cov 与 `gen:types` 离线生成；④ 3 处权限描述从"待实现"改为 `require_owner` 已落地；⑤ 17 节补 SECRET_KEY 强校验、启动查 `pg_roles`、助理 token 只进 sessionStorage；⑥ 19.7.6 修正"自带 Web UI 不用"为 iframe 嵌入；⑦ 20 节文档地图与 22 节变更纪律更新 |
 | 2026-10-28 | v2.1 | W3–W10 交付后同步：7.6 补 `python-dateutil`；19.6 新增 19.6.7「W3–W10 加回来的封装」；15.2 改写为 `set_config` + `after_begin` 事件 |
 | 2026-10-28 | v2.0 | 补齐四块：① 为什么不选 Django/Flask（逐项对比）；② Python 语言规范 10 节（类型/命名/异常/异步/禁止清单）；③ FastAPI 最佳实践 5 组 + **框架最大化利用原则 22 行对照表**；④ 数据库连接方式与权限三入口（含 `SET LOCAL` vs `SET` 的坑）。同时修正 v1.0 中一处误植文本 |
+| 2026-10-28 | v1.0 | 首版：业务边界 + 工程规则 |
+
+> **历史欠账**：v2.2 / v2.3 的增量没有单独写入本表（当时只更新了 `docs/17`–`docs/22`）。
+> 需要追溯时以那几份记录为准，不要再从本文猜。
 | 2026-10-28 | v2.3 | **19.7 重写为接入方案**：V1 不接（顺序问题，非不需要），V2 走侧车。新增三条不能破的前提、记忆三分法（业务事实严禁存入 Harness）、能力接入清单（接 4 项 / 不接 5 项）、架构影响清单、6 步落地流程 |
 | 2026-10-28 | v2.2 | 新增 19.7 **为什么不用 DeepSeek Harness**：它是通用 agent 运行时，我们的模型不做决策；列出三个代价、现有 5% 迷你 harness、V2 若要做对话式助理应做成侧车而非地基 |
 | 2026-10-28 | v2.1 | 11.3 从"职责边界"升级为**目录责任表**（15 行 × 7 列：职责/该放/禁放/框架机制/示例/来源）；新增 11.3.1 请求响应模型放哪的决策、11.4 六个关键位置与请求流转图 |
