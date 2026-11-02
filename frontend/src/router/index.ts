@@ -19,6 +19,7 @@ const router = createRouter({
     { path: '/calendar', name: 'calendar', component: () => import('@/views/CalendarView.vue') },
     { path: '/todos', name: 'todos', component: () => import('@/views/TodosView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
+    { path: '/assistant', name: 'assistant', component: () => import('@/views/AssistantView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
