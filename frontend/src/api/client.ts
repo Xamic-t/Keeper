@@ -5,7 +5,10 @@
  *  · 后端统一返回 {data, meta?} 或 {error:{code,message}}，这里只关心 data
  *  · 写操作要带 X-CSRF-Token（从 cookie 里读，后端登录时种的可读 cookie）
  *  · 401 一律跳登录页
+ *  · 只读演示模式（?demo=1 / VITE_DEMO_MODE）在前端拦截，不请求网络
  */
+
+import { demoEnvelope, demoEnabled } from '@/demo/fixtures'
 
 export interface ApiErrorShape {
   code: string
@@ -81,6 +84,15 @@ async function request<T>(
   } = {},
 ): Promise<T> {
   const method = (options.method ?? 'GET').toUpperCase()
+
+  // 断网演示：命中 fixture 就直接返回，不发请求、不碰真实数据。
+  if (demoEnabled()) {
+    const demo = demoEnvelope(path, method, options.query, options.body)
+    if (demo !== undefined) {
+      return (options.raw ? demo : demo.data) as T
+    }
+  }
+
   const headers: Record<string, string> = {}
   let body: BodyInit | undefined
 

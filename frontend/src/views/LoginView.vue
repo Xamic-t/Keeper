@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { ApiError } from '@/api/client'
+import { enableDemo } from '@/demo/fixtures'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
@@ -27,6 +28,10 @@ async function submit() {
   } finally {
     busy.value = false
   }
+}
+function startDemo() {
+  enableDemo()
+  void router.push({ name: 'today', query: { demo: '1' } })
 }
 </script>
 
@@ -71,6 +76,12 @@ async function submit() {
       </form>
 
       <p class="mt-4 text-center text-xs text-ink-soft">账号由管理员发放，忘记密码请联系管理员。</p>
+      <button class="btn btn-ghost mt-6 w-full" type="button" @click="startDemo">
+        离线演示（不连后端）
+      </button>
+      <p class="mt-2 text-center text-xs text-ink-soft">
+        演示数据是预录的，不会写入你的账号。
+      </p>
     </div>
   </div>
 </template>

@@ -5,10 +5,12 @@ import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import type { SettingsOut } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
+import { demoEnabled, disableDemo } from '@/demo/fixtures'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
+const demoMode = demoEnabled()
 const settings = ref<SettingsOut | null>(null)
 const channelKind = ref<'wecom' | 'pushplus'>('wecom')
 const channelName = ref('')
@@ -89,6 +91,12 @@ async function signOut() {
   router.push({ name: 'login' })
 }
 
+function exitDemo() {
+  disableDemo()
+  // 重新加载，清掉 demo 期间内存里的状态
+  window.location.href = '/login'
+}
+
 // ── 改密码 ──────────────────────────────────────────────
 // 后端 /api/auth/password 一直存在，但前端从没调用过：
 // 改了初始密码这件事只能靠命令行去做。
@@ -126,6 +134,14 @@ onMounted(load)
 <template>
   <div class="mx-auto max-w-2xl">
     <PageHeader title="设置" />
+
+    <section v-if="demoMode" class="card mb-4 border-accent/40 p-4">
+      <h2 class="mb-1 text-sm font-medium">当前是离线演示</h2>
+      <p class="mb-3 text-xs text-ink-soft">
+        所有数据来自预录 fixture，不会写库，也不调模型。关掉浏览器标签页也会自动退出。
+      </p>
+      <button class="btn btn-ghost" @click="exitDemo">退出演示</button>
+    </section>
 
     <p v-if="error" class="mb-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">
       {{ error }}
@@ -247,6 +263,12 @@ onMounted(load)
           {{ changingPassword ? '保存中…' : '保存新密码' }}
         </button>
       </form>
+    </section>
+
+    <section v-if="auth.user?.role === 'owner'" class="card mb-4 p-4">
+      <h2 class="mb-2 text-sm font-medium">账号管理</h2>
+      <p class="mb-3 text-xs text-ink-soft">建号、禁用、重置密码；只有 owner 能进。</p>
+      <RouterLink :to="{ name: 'admin' }" class="btn btn-ghost">打开账号管理</RouterLink>
     </section>
 
     <section class="card mb-4 p-4">

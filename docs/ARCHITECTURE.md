@@ -6,7 +6,7 @@
 >
 > **本文的效力**：新增依赖、调整目录、自定义错误码、更换框架——**都必须先改本文，写明原因，再动代码。**
 >
-> 版本：v2.5 · 2026-11-02（架构符合性审计）
+> 版本：v2.6 · 2026-11-02（D1-A/D2-A/D3-A/D4-A/D5-A 决策落地）
 
 ---
 
@@ -79,7 +79,8 @@
 | **今日** | 一屏看全今天该做什么 | V1 |
 | **设置** | 原图保留开关 / 推送通道 / 改密码 | V1 |
 | **导出** | 全量 ZIP + 单人 JSON | V1 |
-| **管理** | owner 建号 / 禁用 / 重置密码 | V1 后端（无前端） |
+| **管理** | owner 账号列表 / 建号 / 禁用 / 重置密码 | V1（API + 页面） |
+| **离线回放** | 预录 fixture，断网演示完整流程 | V1 |
 | **助理** | 对话式投喂 + 查询（Harness 侧车） | V1 基础 / V2 完整 |
 | **关系温度** | 五维打分驱动活跃窗口 | V2 |
 | **需求感知** | 温度 × 场景的 2×2 判断 | V2 |
@@ -96,8 +97,8 @@
 | 原生 App / 小程序 | 响应式 Web + PWA 够用 |
 | 做平台 / 做社区 | 一个极锋利的个人工具，比平庸平台有价值 |
 
-> ⚠️ **架构符合性（2026-11-02 审计）**：PWA 当前尚未实现；是否补或降范围见 `docs/26` D1。
-> 离线回放同样未实现（`docs/02` §6.4 标 V1），见 `docs/26` D4。
+**2026-11-02 决策**：D1-A 保留 PWA 为 V1 要求；D4-A 保留离线回放为 V1 验收项；
+D5-A 补最小管理 UI。实现记录见 `docs/27-决策落地记录.md`。
 
 ---
 
@@ -150,9 +151,8 @@
 **部署脚本契约**：`deploy.sh` 必须同时起 `app` + `scheduler` + `web`；只起 API 视为部署不完整。
 **本地开发**：`./dev.sh` 默认起 scheduler；调接口不想被写库干扰时用 `./dev.sh --no-scheduler`。
 
-> ⚠️ **待追认的架构变更**：v2.3 原本是"Uvicorn 单进程 + jobs 在进程内"。
-> 2026-11-02 为修 P0「每日任务不触发」拆成 `scheduler` 独立容器。
-> 这属于架构级变更，代码已实现；**是否正式接受，由项目负责人决定**（见 `docs/26` D3）。
+> ✅ 2026-11-02 决策 D3-A：确认采用 **API + Scheduler 双进程**。理由：scheduler 崩了不影响 API，
+> API 发布也不打断定时器；多 worker 部署时不会重复跑同一份提醒。不再回到单进程方案。
 
 ---
 
@@ -283,7 +283,8 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 | 样式 | `tailwindcss` + `@tailwindcss/vite` | 4.x | 全部 | 手写 CSS，且 token 无法集中管理 |
 | 构建 | `vite` | 6.x | dev server / 打包 | — |
 | 类型 | `vue-tsc`、`openapi-typescript` | 2.x / 7.x | 类型检查、`npm run gen:types` 从后端代码导出 `schema.d.ts` | 前后端字段漂移只能运行时发现 |
-| 前端单测 | `vitest` + `happy-dom` | 5.x / 21.x | `npm test`：client 契约、calendar store | 交互回归只能手工点 |
+| PWA | `vite-plugin-pwa` | 1.x | manifest + service worker；静态资源预缓存，`/api` 网络优先 | 手机不能“添加到主屏幕”，断网只剩白屏 |
+| 前端单测 | `vitest` + `happy-dom` | 5.x / 21.x | `npm test`：client 契约、calendar store、demo fixture | 交互回归只能手工点 |
 | 端到端 | `playwright`（根目录 `e2e/`，不放进前端依赖） | 1.x | 真浏览器 8 条用例 | 只能靠人工验收 |
 
 **唯一的"大件"依赖：日历网格**
@@ -458,6 +459,19 @@ from app.services.profile import rewrite_summary
 3. E2E 只使用隔离账号，先跑 `backend/scripts/seed_e2e.py`；失败截图要清掉再重跑。
 4. 覆盖率是**发现盲区**的工具，不是 KPI；当前基线 80%，见 `docs/25`。
 5. `tests/test_architecture.py` 把分层/路由长度/依赖方向变成可执行断言；改架构后同步改它。
+
+### 8.12 离线回放（V1 演示模式）
+
+| 项 | 规则 |
+|---|---|
+| 入口 | `?demo=1` 或构建时 `VITE_DEMO_MODE=true`；进入后写 sessionStorage，刷新仍有效 |
+| 数据 | `frontend/src/demo/fixtures.ts` 预录：登录态、今日页、人列表/档案、确认队列、日历、待办、设置 |
+| 拦截层 | `api/client.ts` 在 fetch 之前拦截 `/api/*`，**不请求后端、不调模型、不写数据库** |
+| 写操作 | 返回演示用成功响应；不改真实数据。演示结束关标签页即回到真实模式 |
+| 离线 | PWA 预缓存前端壳；首次在线打开后断网仍能走完整演示流程 |
+| 边界 | 只覆盖演示需要的页面；不是“离线增删改查”，不能拿来当生产缓存 |
+
+**为什么放在前端而不是后端**：断网时后端也不可达；fixture 放在前端才能真的“断网演示”。
 
 ---
 
@@ -1286,7 +1300,7 @@ Python 从 Postgres 读
 | 子 Agent 编排 | ❌ | 一个助理够了，多 Agent 只会更难调试 |
 | 沙箱 / 文件系统 | ❌ | 助理不需要读写文件，开了就是风险面 |
 | 代码执行 | ❌ | 不需要，且危险 |
-| 自带 Web UI | ❌ | 我们有自己的 Vue 前端（当前 `/assistant` iframe 嵌入 dsh，属于偏离，待决策，见 `docs/26` D2） |
+| 自带 Web UI | ✅（V1 嵌入） | `/assistant` iframe 嵌 dsh Web UI；token 地址只存当前标签页 `sessionStorage`。2026-11-02 D2-A 决策：V1 不自研助理前端，V2 再评估 |
 | 四种预设模式 | 选 **minimal** | 工具少、行为可预测 |
 
 #### 19.7.7 架构影响清单
@@ -1342,7 +1356,8 @@ Python 从 Postgres 读
 | [`04-计划与验收`](./04-计划与验收.md) | 里程碑、四层验收、止损信号 | 每周对照 |
 
 **交付与证据（按时间倒序）**：
-- `docs/26-架构符合性审计.md`：直接违背已修 + PWA/Harness UI/双进程/离线回放的决策清单
+- `docs/27-决策落地记录.md`：D1-A ~ D5-A 的落地与验收（PWA / iframe / 双进程 / 离线回放 / 管理 UI）
+- `docs/26-架构符合性审计.md`：直接违背已修 + 决策清单
 - `docs/25-测试补齐报告.md`：测试补齐记录（当时 198 pytest；当前 267，含 69 条架构约束）
 - `docs/24-评审问题debug报告.md`：P0/P1/P2 逐条处置
 - `docs/23-夜间开发报告.md`：B0–B10 批次
@@ -1381,6 +1396,7 @@ Python 从 Postgres 读
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
+| 2026-11-02 | v2.6 | D1-A/D2-A/D3-A/D4-A/D5-A 决策落地：PWA 保留为 V1；Harness UI 正式采用 iframe（V1）；API+Scheduler 双进程转正；新增 8.12 离线回放 fixture 模式；管理 UI 纳入 V1；7.6.1 补 vite-plugin-pwa |
 | 2026-11-02 | v2.5 | 架构符合性审计：恢复 v2.4 擅自删除的 PWA 要求与 Harness "自带 Web UI ❌" 原约束（代码违背处列 `docs/26` 待决策）；给 Scheduler 双进程变更加"待追认"标记；新增 8.11 测试分层与架构约束测试说明 |
 | 2026-11-02 | v2.4 | 同步交付后架构：① 第 6 节部署拓扑改为 API + Scheduler 双进程 + 可选 Harness 侧车；② 7.6/19.3 校正 V1 为 13 张表、pgvector V1 未启用；③ 7.6.1/8.1 补 Vitest / Playwright / pytest-cov 与 `gen:types` 离线生成；④ 3 处权限描述从"待实现"改为 `require_owner` 已落地；⑤ 17 节补 SECRET_KEY 强校验、启动查 `pg_roles`、助理 token 只进 sessionStorage；⑥ 19.7.6 修正"自带 Web UI 不用"为 iframe 嵌入；⑦ 20 节文档地图与 22 节变更纪律更新 |
 | 2026-10-28 | v2.1 | W3–W10 交付后同步：7.6 补 `python-dateutil`；19.6 新增 19.6.7「W3–W10 加回来的封装」；15.2 改写为 `set_config` + `after_begin` 事件 |

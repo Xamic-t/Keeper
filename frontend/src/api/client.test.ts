@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api, ApiError, onUnauthorized } from './client'
+import { disableDemo, enableDemo } from '@/demo/fixtures'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -13,6 +14,7 @@ describe('api client', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     onUnauthorized(() => undefined)
+    disableDemo()
     window.history.pushState({}, '', '/')
   })
 
@@ -89,6 +91,17 @@ describe('api client', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(api.delete('/todos/1')).resolves.toBeUndefined()
+  })
+
+  it('离线演示命中 fixture 时不发网络请求', async () => {
+    enableDemo()
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const today = await api.get<{ tasks: unknown[] }>('/today')
+
+    expect(today.tasks.length).toBeGreaterThan(0)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('AbortError 转成可读的 REQUEST_TIMEOUT', async () => {

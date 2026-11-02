@@ -152,6 +152,16 @@ export interface ConfirmationGroup {
   items: ConfirmationItem[]
 }
 
+export interface AdminUserOut {
+  id: number
+  username: string
+  display_name: string | null
+  role: string
+  is_active: boolean
+  last_login_at: string | null
+  created_at: string
+}
+
 export interface SettingsOut {
   keep_original_images: boolean
   channels: {
