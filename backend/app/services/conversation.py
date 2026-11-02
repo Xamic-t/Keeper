@@ -29,7 +29,7 @@ from app.core.clock import local_today
 from app.core.errors import AppError, ErrorCode
 from app.models.chat import ChatMessage
 from app.models.event import Event
-from app.models.fact import Fact
+from app.models.fact import Fact, Tag
 from app.models.input import RawInput
 from app.models.person import Person
 from app.models.todo import Todo
@@ -53,6 +53,10 @@ HISTORY_TURNS = 8
 MAX_ACTIONS_PER_TURN = 3
 # 快照里各列表的长度上限（人物 20 人规模，全给没关系）
 SNAPSHOT_LIMIT = 20
+# 每个人最多带几条已确认事实/标签进上下文。
+# 给多了 prompt 会膨胀（20 人 × 10 条），给少了模型只会说"没记着"——3 条是甜点。
+FACTS_PER_PERSON = 3
+TAGS_PER_PERSON = 3
 
 ALLOWED_ACTIONS = {"create_todo", "create_event", "add_fact"}
 
@@ -116,6 +120,42 @@ class TurnResult:
 # ── 上下文快照 ────────────────────────────────────────────
 
 
+async def _facts_by_person(session: AsyncSession) -> dict[int, list[str]]:
+    """每个已确认事实的短句，按人分组，每人最多 FACTS_PER_PERSON 条。
+
+    为什么不带 evidence：模型的回答里引用出处靠不住（容易编），
+    而事实本身是用户点过确认的。要看出处回档案页看。
+    """
+    rows = (
+        await session.execute(
+            select(Fact.person_id, Fact.content)
+            .where(Fact.status == "confirmed")
+            .order_by(Fact.person_id, Fact.weight.desc(), Fact.created_at.desc())
+        )
+    ).all()
+
+    grouped: dict[int, list[str]] = {}
+    for person_id, content in rows:
+        bucket = grouped.setdefault(person_id, [])
+        if len(bucket) < FACTS_PER_PERSON:
+            bucket.append(str(content)[:60])
+    return grouped
+
+
+async def _tags_by_person(session: AsyncSession) -> dict[int, list[str]]:
+    """标签按 "key:value" 给人看，每人最多 TAGS_PER_PERSON 个。"""
+    rows = (
+        await session.execute(select(Tag.person_id, Tag.key, Tag.value).order_by(Tag.person_id))
+    ).all()
+
+    grouped: dict[int, list[str]] = {}
+    for person_id, key, value in rows:
+        bucket = grouped.setdefault(person_id, [])
+        if len(bucket) < TAGS_PER_PERSON:
+            bucket.append(f"{key}:{value}")
+    return grouped
+
+
 async def build_snapshot(session: AsyncSession) -> dict[str, Any]:
     """给模型看的最小上下文。
 
@@ -162,6 +202,8 @@ async def build_snapshot(session: AsyncSession) -> dict[str, Any]:
     )
 
     person_names = {person.id: person.nickname for person in persons}
+    facts_by_person = await _facts_by_person(session)
+    tags_by_person = await _tags_by_person(session)
 
     return {
         "今天": today.isoformat(),
@@ -169,7 +211,8 @@ async def build_snapshot(session: AsyncSession) -> dict[str, Any]:
             {
                 "昵称": person.nickname,
                 "别名": list(person.aliases or []),
-                "最近事实条数": None,  # 占位：不查，避免 N+1
+                "标签": tags_by_person.get(person.id or 0, []),
+                "事实": facts_by_person.get(person.id or 0, []),
             }
             for person in persons
         ],
@@ -196,10 +239,6 @@ def render_prompt(snapshot: dict[str, Any]) -> str:
         template = template_path.read_text(encoding="utf-8")
     except OSError as exc:
         raise AppError(ErrorCode.INTERNAL_ERROR, "助理提示词缺失", status_code=500) from exc
-
-    # 人物列表里那个占位字段没意义，渲染前剔掉，省 token
-    for person in snapshot.get("人物", []):
-        person.pop("最近事实条数", None)
 
     return template.replace("{snapshot}", json.dumps(snapshot, ensure_ascii=False, indent=2))
 

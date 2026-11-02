@@ -525,3 +525,51 @@ async def test_normal_instruction_still_executes(
     assert len(response.json()["data"]["actions"]) == 1
     async with rls_session(single_user.id) as session:
         assert len((await session.execute(select(Todo))).scalars().all()) == 1
+
+
+async def test_snapshot_includes_confirmed_facts_and_tags(
+    client: httpx.AsyncClient, single_user: Account, fake_model: dict
+) -> None:
+    """上下文里必须带"已确认"的事实与标签——否则助理对谁都只会说"没记着"。"""
+    from app.models.fact import Fact, Tag
+
+    async with rls_session(single_user.id) as session:
+        person = Person(user_id=single_user.id, nickname="孟雅楠", aliases=["雅楠"])
+        session.add(person)
+        await session.flush()
+        session.add(
+            Fact(
+                user_id=single_user.id,
+                person_id=person.id,
+                content="喜欢喝苹果汁",
+                category="preference",
+                confidence=0.9,
+                source_type="manual",
+                status="confirmed",
+            )
+        )
+        session.add(
+            Fact(
+                user_id=single_user.id,
+                person_id=person.id,
+                content="还没确认的猜测",
+                category="preference",
+                confidence=0.5,
+                source_type="manual",
+                status="pending",
+            )
+        )
+        session.add(
+            Tag(user_id=single_user.id, person_id=person.id, key="preference", value="苹果汁")
+        )
+        await session.commit()
+
+    csrf = await login(client, single_user)
+    await client.post(
+        "/api/conversation/messages", data={"text": "孟雅楠喜欢喝什么"}, headers=csrf_headers(csrf)
+    )
+
+    system = fake_model["messages"][0]["content"]
+    assert "苹果汁" in system, "已确认事实要进上下文"
+    assert "preference:苹果汁" in system, "标签也要进"
+    assert "还没确认的猜测" not in system, "待确认的事实不许进上下文，会污染回答"
