@@ -495,9 +495,7 @@ async def extract_from_raw_input(
     return result
 
 
-async def _drop_image_if_disabled(
-    session: AsyncSession, raw_input: RawInput, user_id: int
-) -> None:
+async def _drop_image_if_disabled(session: AsyncSession, raw_input: RawInput, user_id: int) -> None:
     """用户关掉「保留原图」时，识别完把文件删掉。
 
     只置 file_path=None 不够：磁盘上还留着原图，隐私承诺就是假的。

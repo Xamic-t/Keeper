@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import local_today
+from app.core.errors import AppError, ErrorCode
 from app.models.event import Event
 from app.models.fact import Fact
 from app.models.input import RawInput
@@ -36,7 +37,18 @@ logger = logging.getLogger(__name__)
 # "她喜欢喝美式" 是陈述句，里面也有"喜欢"，但它必须走投喂——
 # 判成查询就等于把这条材料丢了，而丢材料比多一条垃圾材料严重得多。
 _QUESTION_MARKS = (
-    "？", "?", "吗", "呢", "什么", "啥", "谁", "哪", "多少", "怎么", "为什么", "几点"
+    "？",
+    "?",
+    "吗",
+    "呢",
+    "什么",
+    "啥",
+    "谁",
+    "哪",
+    "多少",
+    "怎么",
+    "为什么",
+    "几点",
 )
 
 # 一次回答最多列几条事实。列太多就不叫"一句话回答"了
@@ -54,6 +66,16 @@ class ChatReply:
     facts: list[dict[str, Any]] = field(default_factory=list)
     raw_input_id: int | None = None
     pending_count: int = 0
+
+
+def validate_message(text: str, *, has_image: bool) -> str:
+    """校验对话输入，返回去空白后的文本。"""
+    cleaned = (text or "").strip()
+    if len(cleaned) > 2000:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "一次最多 2000 字", status_code=400)
+    if not cleaned and not has_image:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "至少说一句或发一张图", status_code=400)
+    return cleaned
 
 
 def detect_intent(*, text: str, has_image: bool, person_id: int | None) -> str:
@@ -84,9 +106,7 @@ async def _all_persons(session: AsyncSession) -> list[Person]:
     return list(rows.all())
 
 
-async def _match_person(
-    session: AsyncSession, text: str, person_id: int | None
-) -> Person | None:
+async def _match_person(session: AsyncSession, text: str, person_id: int | None) -> Person | None:
     """从一句话里认出说的是谁。用户指定了就用指定的。"""
     if person_id is not None:
         return await session.get(Person, person_id)
@@ -211,9 +231,7 @@ async def _handle_feed(
         if item.error is not None:
             return ChatReply(reply="这张图没存下：" + (item.error or "未知原因"), intent="feed")
         if item.duplicate:
-            return ChatReply(
-                reply="这张图之前投过，同一张不会重复抽。换一张给我。", intent="feed"
-            )
+            return ChatReply(reply="这张图之前投过，同一张不会重复抽。换一张给我。", intent="feed")
         raw_input_id = item.raw_input_id
     else:
         raw_input = await ingest_service.ingest_text(session, user_id, text, person_id)
@@ -235,7 +253,8 @@ async def _handle_feed(
     if raw_input.status == "failed":
         logger.warning("chat extraction failed raw_input_id=%s", raw_input_id)
         return ChatReply(
-            reply="抽取出错了，材料还在，去投喂页看看失败原因。", intent="feed",
+            reply="抽取出错了，材料还在，去投喂页看看失败原因。",
+            intent="feed",
             raw_input_id=raw_input_id,
         )
 
@@ -249,8 +268,7 @@ async def _handle_feed(
         if nickname is None:
             return ChatReply(
                 reply=(
-                    "材料收下了，但没认出这是谁，事实先没落。"
-                    "去投喂页把它指给某个人，我再抽一遍。"
+                    "材料收下了，但没认出这是谁，事实先没落。去投喂页把它指给某个人，我再抽一遍。"
                 ),
                 intent="feed",
                 raw_input_id=raw_input_id,

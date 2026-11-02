@@ -150,9 +150,7 @@ async def ensure_daily_template(session: AsyncSession, user_id: int, today: date
     # (user_id, source, due_date) 会把 3 条压成 1 条；
     # 把 title 也加进唯一键，又会让"把待办改名成另一个模板标题"这句用户操作直接报错。
     # 锁的范围只有这一天，代价可以忽略。
-    await session.execute(
-        select(func.pg_advisory_xact_lock(user_id, today.toordinal()))
-    )
+    await session.execute(select(func.pg_advisory_xact_lock(user_id, today.toordinal())))
 
     stale = (
         (

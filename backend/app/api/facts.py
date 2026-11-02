@@ -3,20 +3,18 @@
 对应文档：specs/06-profile.md
 """
 
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
 from app.models.fact import Fact, Tag
-from app.models.person import Person
+from app.services import facts as facts_service
 from app.services import profile as profile_service
 
 router = APIRouter(tags=["facts"])
@@ -58,6 +56,32 @@ class SummaryOut(BaseModel):
     stale: bool
 
 
+def _fact_out(fact: Fact) -> FactOut:
+    return FactOut(
+        id=fact.id or 0,
+        person_id=fact.person_id,
+        content=fact.content,
+        category=fact.category,
+        weight=fact.weight,
+        confidence=fact.confidence,
+        evidence=fact.evidence,
+        status=fact.status,
+        last_confirmed_at=fact.last_confirmed_at,
+        created_at=fact.created_at,
+    )
+
+
+def _tag_out(tag: Tag) -> TagOut:
+    return TagOut(
+        id=tag.id or 0,
+        person_id=tag.person_id,
+        key=tag.key,
+        value=tag.value,
+        confidence=tag.confidence,
+        expires_at=tag.expires_at,
+    )
+
+
 @router.get(
     "/persons/{person_id}/facts",
     response_model=DataResponse[list[FactOut]],
@@ -70,23 +94,7 @@ async def list_facts(
 ) -> dict[str, Any]:
     """档案页的事实列表。默认只给已确认的。"""
     facts = await profile_service.facts_of(session, person_id, include_pending=include_pending)
-    return ok(
-        [
-            FactOut(
-                id=fact.id or 0,
-                person_id=fact.person_id,
-                content=fact.content,
-                category=fact.category,
-                weight=fact.weight,
-                confidence=fact.confidence,
-                evidence=fact.evidence,
-                status=fact.status,
-                last_confirmed_at=fact.last_confirmed_at,
-                created_at=fact.created_at,
-            )
-            for fact in facts
-        ]
-    )
+    return ok([_fact_out(fact) for fact in facts])
 
 
 @router.patch(
@@ -101,35 +109,14 @@ async def update_fact(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """改事实内容/类别/权重。已确认的事实不能改类别（要改先驳回）。"""
-    fact = await session.get(Fact, fact_id)
-    if fact is None:
-        raise AppError(ErrorCode.NOT_FOUND, "找不到这条事实", status_code=404)
-    if payload.category is not None and fact.status == "confirmed":
-        raise AppError(ErrorCode.INVALID_STATE, "已确认的事实不能改类别，请先驳回", status_code=400)
-
-    if payload.content is not None:
-        fact.content = payload.content
-    if payload.category is not None:
-        fact.category = payload.category
-    if payload.weight is not None:
-        fact.weight = payload.weight
-    session.add(fact)
-    await session.commit()
-
-    return ok(
-        FactOut(
-            id=fact.id or 0,
-            person_id=fact.person_id,
-            content=fact.content,
-            category=fact.category,
-            weight=fact.weight,
-            confidence=fact.confidence,
-            evidence=fact.evidence,
-            status=fact.status,
-            last_confirmed_at=fact.last_confirmed_at,
-            created_at=fact.created_at,
-        )
+    fact = await facts_service.update_fact(
+        session,
+        fact_id,
+        content=payload.content,
+        category=payload.category,
+        weight=payload.weight,
     )
+    return ok(_fact_out(fact))
 
 
 @router.delete(
@@ -143,11 +130,7 @@ async def delete_fact(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
     """删一条事实。确认过的事实删掉后档案会变薄。"""
-    fact = await session.get(Fact, fact_id)
-    if fact is None:
-        raise AppError(ErrorCode.NOT_FOUND, "找不到这条事实", status_code=404)
-    await session.delete(fact)
-    await session.commit()
+    await facts_service.delete_fact(session, fact_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -158,28 +141,8 @@ async def list_tags(
     person_id: int | None = None,
 ) -> dict[str, Any]:
     """标签列表，用于筛选（"谁喜欢茶"）。过期的标签不返回。"""
-    now = datetime.now(UTC)
-    stmt = select(Tag).where((Tag.expires_at.is_(None)) | (Tag.expires_at > now))
-    if key:
-        stmt = stmt.where(Tag.key == key)
-    if person_id is not None:
-        stmt = stmt.where(Tag.person_id == person_id)
-    stmt = stmt.order_by(Tag.created_at.desc())
-
-    tags = list((await session.execute(stmt)).scalars().all())
-    return ok(
-        [
-            TagOut(
-                id=tag.id or 0,
-                person_id=tag.person_id,
-                key=tag.key,
-                value=tag.value,
-                confidence=tag.confidence,
-                expires_at=tag.expires_at,
-            )
-            for tag in tags
-        ]
-    )
+    tags = await facts_service.list_tags(session, key=key, person_id=person_id)
+    return ok([_tag_out(tag) for tag in tags])
 
 
 @router.post(
@@ -194,12 +157,5 @@ async def rewrite_summary(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """调模型重写综述。失败时保留旧综述。"""
-    summary = await profile_service.rewrite_summary(session, person_id)
-    person = await session.get(Person, person_id)
-    return ok(
-        SummaryOut(
-            person_id=person_id,
-            summary=summary,
-            stale=bool(person.summary_stale) if person else True,
-        )
-    )
+    summary, stale = await facts_service.rewrite_summary(session, person_id)
+    return ok(SummaryOut(person_id=person_id, summary=summary, stale=stale))

@@ -89,9 +89,7 @@ class Settings(BaseSettings):
         """
         if self.database_url is None:
             password = quote(self.app_db_password.get_secret_value(), safe="")
-            self.database_url = (
-                f"postgresql+psycopg://keeper_app:{password}@localhost:5432/keeper"
-            )
+            self.database_url = f"postgresql+psycopg://keeper_app:{password}@localhost:5432/keeper"
         if self.database_url_migrate is None:
             password = quote(self.db_password.get_secret_value(), safe="")
             self.database_url_migrate = (

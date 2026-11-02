@@ -125,9 +125,7 @@ def main() -> int:
     print("Keeper 模型自检")
     print("=" * 68)
 
-    api_key = (
-        settings.deepseek_api_key.get_secret_value() if settings.deepseek_api_key else None
-    )
+    api_key = settings.deepseek_api_key.get_secret_value() if settings.deepseek_api_key else None
     fallback_key = (
         settings.dashscope_api_key.get_secret_value() if settings.dashscope_api_key else None
     )
@@ -170,10 +168,7 @@ def main() -> int:
 
     print("\n【3/4】图片请求（验视觉，这是投喂能不能用的关键）")
     data_url = "data:image/png;base64," + base64.b64encode(_test_image()).decode()
-    question = (
-        "这张图的背景是什么颜色？图上写了什么文字？"
-        "只回答一行，格式：颜色=<颜色> 文字=<文字>"
-    )
+    question = "这张图的背景是什么颜色？图上写了什么文字？只回答一行，格式：颜色=<颜色> 文字=<文字>"
     image_content = [
         {"type": "text", "text": question},
         {"type": "image_url", "image_url": {"url": data_url}},

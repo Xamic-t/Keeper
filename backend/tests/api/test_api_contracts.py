@@ -154,9 +154,7 @@ async def test_events_crud(client: httpx.AsyncClient, account: Account) -> None:
     assert deleted.status_code == 204
 
 
-async def test_ledger_crud_recalculates_totals(
-    client: httpx.AsyncClient, account: Account
-) -> None:
+async def test_ledger_crud_recalculates_totals(client: httpx.AsyncClient, account: Account) -> None:
     person_id = await _person(account)
     csrf = await login(client, account)
     headers = csrf_headers(csrf)
@@ -212,9 +210,7 @@ async def test_todos_crud(client: httpx.AsyncClient, account: Account) -> None:
     assert listing.status_code == 200
     assert any(item["title"] == "契约待办" for item in listing.json()["data"])
 
-    done = await client.patch(
-        f"/api/todos/{todo_id}", json={"status": "done"}, headers=headers
-    )
+    done = await client.patch(f"/api/todos/{todo_id}", json={"status": "done"}, headers=headers)
     assert done.status_code == 200
     assert done.json()["data"]["status"] == "done"
     assert done.json()["data"]["done_at"] is not None
@@ -296,9 +292,7 @@ async def test_confirmations_list_and_fact_delete(
     assert all(item["id"] != confirmed_id for item in facts.json()["data"])
 
 
-async def test_person_delete_removes_detail(
-    client: httpx.AsyncClient, account: Account
-) -> None:
+async def test_person_delete_removes_detail(client: httpx.AsyncClient, account: Account) -> None:
     person_id = await _person(account, "待删除")
     csrf = await login(client, account)
 
@@ -397,22 +391,16 @@ async def test_confirmation_reject(client: httpx.AsyncClient, account: Account) 
         fact_id = fact.id
 
     csrf = await login(client, account)
-    response = await client.post(
-        f"/api/confirmations/{fact_id}/reject", headers=csrf_headers(csrf)
-    )
+    response = await client.post(f"/api/confirmations/{fact_id}/reject", headers=csrf_headers(csrf))
 
     assert response.status_code == 200
     assert response.json()["data"]["status"] == "rejected"
 
 
-async def test_chat_requires_text_or_image(
-    client: httpx.AsyncClient, account: Account
-) -> None:
+async def test_chat_requires_text_or_image(client: httpx.AsyncClient, account: Account) -> None:
     csrf = await login(client, account)
 
-    response = await client.post(
-        "/api/chat", data={"message": "   "}, headers=csrf_headers(csrf)
-    )
+    response = await client.post("/api/chat", data={"message": "   "}, headers=csrf_headers(csrf))
 
     assert response.status_code == 400
     assert "至少说一句" in response.json()["error"]["message"]

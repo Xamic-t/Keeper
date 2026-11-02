@@ -98,10 +98,10 @@ async def _find_user(username: str | None) -> int:
             ).scalar_one_or_none()
         else:
             user = (
-                await session.execute(
-                    select(User).where(User.role == "owner").order_by(User.id)
-                )
-            ).scalars().first()
+                (await session.execute(select(User).where(User.role == "owner").order_by(User.id)))
+                .scalars()
+                .first()
+            )
         if user is None or user.id is None:
             hint = f"找不到账号 {username!r}。" if username else "库里没有 owner 账号。"
             raise SystemExit(f"{hint}\n用 --user 指定登录名，或先在系统里建一个账号。")
@@ -207,9 +207,7 @@ async def _dump(item: Item, user_id: int) -> None:
         ]
 
 
-async def _run_one(
-    index: int, path: Path, user_id: int, person_id: int | None
-) -> Item:
+async def _run_one(index: int, path: Path, user_id: int, person_id: int | None) -> Item:
     """一张图：读字节 → 落盘去重 → 抽取 → 读回结果。"""
     content = path.read_bytes()
     suffix = _sniff_suffix(content)
@@ -403,10 +401,7 @@ async def _main(args: argparse.Namespace) -> int:
         return _score(Path(args.score).expanduser())
 
     if not args.dir and not args.files:
-        print(
-            "要么给 --dir 指定截图目录，要么用 --files 指定几张图，"
-            "要么用 --score 算准确率。"
-        )
+        print("要么给 --dir 指定截图目录，要么用 --files 指定几张图，要么用 --score 算准确率。")
         return 2
 
     if args.files:
@@ -504,9 +499,7 @@ def main() -> int:
         default=None,
         help="直接指定几张图（和 --dir 二选一），例如 --files ~/a.png ~/b.png",
     )
-    parser.add_argument(
-        "--user", default=None, help="用哪个账号跑（登录名），不填就取 owner 账号"
-    )
+    parser.add_argument("--user", default=None, help="用哪个账号跑（登录名），不填就取 owner 账号")
     parser.add_argument("--person-id", type=int, default=None, help="强制挂到某个人身上")
     parser.add_argument("--limit", type=int, default=None, help="只跑前 N 张")
     parser.add_argument("--out", default=None, help="核对表输出路径")

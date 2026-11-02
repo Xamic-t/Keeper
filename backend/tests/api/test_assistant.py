@@ -50,32 +50,24 @@ async def test_unconfigured_returns_503(client: httpx.AsyncClient) -> None:
     assert response.status_code == 503
 
 
-async def test_wrong_token_returns_401(
-    client: httpx.AsyncClient, assistant_as: Account
-) -> None:
+async def test_wrong_token_returns_401(client: httpx.AsyncClient, assistant_as: Account) -> None:
     response = await client.get("/api/assistant/today", headers={"X-Assistant-Token": "wrong"})
     assert response.status_code == 401
     response = await client.get("/api/assistant/today")
     assert response.status_code == 401
 
 
-async def test_today_works_with_token(
-    client: httpx.AsyncClient, assistant_as: Account
-) -> None:
+async def test_today_works_with_token(client: httpx.AsyncClient, assistant_as: Account) -> None:
     await _person(assistant_as, "孟雅楠")
 
-    response = await client.get(
-        "/api/assistant/today", headers={"X-Assistant-Token": TOKEN}
-    )
+    response = await client.get("/api/assistant/today", headers={"X-Assistant-Token": TOKEN})
     assert response.status_code == 200
     data = response.json()["data"]
     assert "date" in data
     assert isinstance(data["tasks"], list)
 
 
-async def test_persons_only_returns_token_owner_data(
-    two_users: tuple[Account, Account]
-) -> None:
+async def test_persons_only_returns_token_owner_data(two_users: tuple[Account, Account]) -> None:
     """token 只绕过登录，绕不过 RLS —— 别人的数据一条都不能出现。"""
     user_a, user_b = two_users
     await _person(user_a, "我自己的人")
@@ -102,9 +94,7 @@ async def test_persons_only_returns_token_owner_data(
     assert "别人的客户" not in names
 
 
-async def test_facts_only_confirmed(
-    client: httpx.AsyncClient, assistant_as: Account
-) -> None:
+async def test_facts_only_confirmed(client: httpx.AsyncClient, assistant_as: Account) -> None:
     """事实接口只回已确认的：没点过确认的东西不能拿去回答。"""
     person_id = await _person(assistant_as, "王姐")
 
@@ -125,9 +115,7 @@ async def test_no_write_endpoints(client: httpx.AsyncClient, assistant_as: Accou
         ("patch", f"/api/assistant/persons/{person_id}"),
         ("delete", f"/api/assistant/persons/{person_id}"),
     ):
-        response = await client.request(
-            method.upper(), path, headers={"X-Assistant-Token": TOKEN}
-        )
+        response = await client.request(method.upper(), path, headers={"X-Assistant-Token": TOKEN})
         assert response.status_code in (404, 405), f"{method} {path} 不该存在"
 
 
@@ -168,9 +156,7 @@ async def test_ledger_requires_person_and_returns_totals(
             note="助理读往来用例",
         )
 
-    missing = await client.get(
-        "/api/assistant/ledger", headers={"X-Assistant-Token": TOKEN}
-    )
+    missing = await client.get("/api/assistant/ledger", headers={"X-Assistant-Token": TOKEN})
     assert missing.status_code == 400
 
     response = await client.get(

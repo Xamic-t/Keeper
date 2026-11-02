@@ -63,9 +63,7 @@ async def _assert_database_role_respects_rls() -> None:
     async with engine.connect() as conn:
         row = (
             await conn.execute(
-                text(
-                    "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
-                )
+                text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
             )
         ).first()
 

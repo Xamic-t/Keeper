@@ -98,9 +98,7 @@ async def expand_events(session: AsyncSession, start: date, end: date) -> list[C
                 )
 
     # 已经有生日事件的人，别再靠关系表重复生成（不分农历/公历，否则同一天两条）
-    covered = {
-        event.person_id for event in events if event.type == "birthday" and event.person_id
-    }
+    covered = {event.person_id for event in events if event.type == "birthday" and event.person_id}
     # 关系表里存了生日、但用户没手动建事件的，补进私人日历
     items.extend(await _relationship_birthdays(session, start, end, covered))
 
@@ -155,8 +153,7 @@ async def _relationship_birthdays(
         select(Relationship, Person.nickname)
         .join(Person, Person.id == Relationship.person_id)
         .where(
-            (Relationship.birthday_solar.is_not(None))
-            | (Relationship.birthday_lunar.is_not(None))
+            (Relationship.birthday_solar.is_not(None)) | (Relationship.birthday_lunar.is_not(None))
         )
     )
     rows = (await session.execute(stmt)).all()

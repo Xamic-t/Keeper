@@ -81,9 +81,7 @@ async def test_no_channel_keeps_pending_and_records_reason(account: Account) -> 
         assert "通道" in fresh.last_error
 
 
-async def test_today_shows_unsent_reminder(
-    client: httpx.AsyncClient, account: Account
-) -> None:
+async def test_today_shows_unsent_reminder(client: httpx.AsyncClient, account: Account) -> None:
     await _make_reminder(account, status="pending", last_error="没有配置推送通道")
     await login(client, account)
 
@@ -97,9 +95,7 @@ async def test_today_shows_unsent_reminder(
     assert "通道" in reminders[0]["unsent_reason"]
 
 
-async def test_unsent_reminder_can_become_todo(
-    client: httpx.AsyncClient, account: Account
-) -> None:
+async def test_unsent_reminder_can_become_todo(client: httpx.AsyncClient, account: Account) -> None:
     reminder_id, _ = await _make_reminder(account, status="pending")
     csrf_token = await login(client, account)
 

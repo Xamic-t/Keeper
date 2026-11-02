@@ -18,8 +18,6 @@ from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
 from app.services import ingest as ingest_service
-from app.services.ingest import UploadItem
-from app.services.storage import sniff_image_suffix
 
 router = APIRouter(tags=["ingest"])
 
@@ -74,41 +72,14 @@ async def upload_images(
     person_id: Annotated[int | None, Form()] = None,
 ) -> dict[str, Any]:
     """存盘 + 去重 + 排队。返回每张的结果，不等抽取。"""
-    if not files:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "至少要传一张图", status_code=400)
-    if len(files) > settings.max_upload_count:
-        raise AppError(
-            ErrorCode.VALIDATION_ERROR,
-            f"一次最多 {settings.max_upload_count} 张",
-            status_code=400,
-        )
-
+    ingest_service.validate_image_count(len(files))
     limit = settings.max_upload_mb * 1024 * 1024
-    items: list[UploadItem] = []
-    for upload in files:
-        # 只读 limit+1 字节：超了立刻能判断，不用把整个文件读进内存
-        content = await upload.read(limit + 1)
-        if len(content) > limit:
-            raise AppError(
-                ErrorCode.FILE_TOO_LARGE,
-                f"单张不能超过 {settings.max_upload_mb}MB",
-                status_code=413,
-                detail={"max_mb": settings.max_upload_mb},
-            )
-        suffix = sniff_image_suffix(content)
-        if suffix is None:
-            raise AppError(
-                ErrorCode.VALIDATION_ERROR,
-                "只支持 jpg / png / webp",
-                status_code=400,
-                detail={"filename": upload.filename},
-            )
-        items.append(
-            UploadItem(filename=upload.filename or "upload", content=content, suffix=suffix)
-        )
+    items = [
+        ingest_service.build_upload_item(upload.filename, await upload.read(limit + 1))
+        for upload in files
+    ]
 
     results = await ingest_service.ingest_images(session, user.id, items, person_id)
-
     queued = 0
     for item in results:
         if item.raw_input_id is not None and not item.duplicate and item.error is None:

@@ -8,7 +8,6 @@
 这个用例同时钉住"上限还在"，避免以后被人顺手删掉。
 """
 
-
 import httpx
 import pytest
 from sqlalchemy import select

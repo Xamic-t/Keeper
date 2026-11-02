@@ -80,6 +80,23 @@ def _user_out(user: User) -> UserOut:
     )
 
 
+def _set_auth_cookies(response: Response, user_id: int, csrf_token: str) -> None:
+    """种 session（httpOnly，XSS 偷不走）+ csrf（可读，前端放请求头）。"""
+    for key, value, http_only in (
+        ("session", create_session_token(user_id), True),
+        ("csrf", csrf_token, False),
+    ):
+        response.set_cookie(
+            key=key,
+            value=value,
+            httponly=http_only,
+            secure=not settings.is_dev,
+            samesite="lax",
+            max_age=settings.session_max_age,
+            path="/",
+        )
+
+
 # ---------- 路由 ----------
 
 
@@ -114,28 +131,7 @@ async def login(
     login_limiter.reset(client_ip)
     user_out = _user_out(user)
     csrf_token = generate_csrf_token()
-
-    # session：前端读不到，XSS 偷不走
-    response.set_cookie(
-        key="session",
-        value=create_session_token(user_out.id),
-        httponly=True,
-        secure=not settings.is_dev,
-        samesite="lax",
-        max_age=settings.session_max_age,
-        path="/",
-    )
-    # csrf：故意可读，前端取出来放进 X-CSRF-Token
-    response.set_cookie(
-        key="csrf",
-        value=csrf_token,
-        httponly=False,
-        secure=not settings.is_dev,
-        samesite="lax",
-        max_age=settings.session_max_age,
-        path="/",
-    )
-
+    _set_auth_cookies(response, user_out.id, csrf_token)
     return ok(LoginData(user=user_out, csrf_token=csrf_token))
 
 

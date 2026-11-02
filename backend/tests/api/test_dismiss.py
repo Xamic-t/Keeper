@@ -123,9 +123,7 @@ async def test_dismiss_is_idempotent(client: httpx.AsyncClient, account: Account
     assert second.json()["data"]["status"] == "ignored"
 
 
-async def test_drop_image_deletes_file_when_setting_off(
-    account: Account, workspace: Path
-) -> None:
+async def test_drop_image_deletes_file_when_setting_off(account: Account, workspace: Path) -> None:
     """开关关掉时，识别完必须真把文件从磁盘删掉，并把 file_path 置空。"""
     image = workspace / "shot.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\n fake")

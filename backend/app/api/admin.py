@@ -6,6 +6,8 @@
   · 不能删自己
   · 不能禁用最后一个 owner
   · 建号必须由调用方指定初始密码（仓库里不留任何默认口令）
+
+业务规则在 `services/admin.py`；本文件只做参数与响应映射。
 """
 
 from datetime import datetime
@@ -13,14 +15,12 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
-from app.core.security import hash_password
 from app.deps import CurrentUser, get_session, require_csrf, require_owner
 from app.models.user import User
+from app.services import admin as admin_service
 
 router = APIRouter(prefix="/admin/users", tags=["admin"])
 
@@ -41,9 +41,7 @@ class UserCreateIn(BaseModel):
     role: Literal["owner", "member"] = "member"
     # 以前这里有个写死的默认口令，而仓库是公开的 —— 等于公开了建号口令（评审 P2-1）。
     # 现在必须显式传，没有默认值。
-    password: str = Field(
-        min_length=8, max_length=128, description="初始密码，必须由调用方指定"
-    )
+    password: str = Field(min_length=8, max_length=128, description="初始密码，必须由调用方指定")
 
 
 class UserUpdateIn(BaseModel):
@@ -53,28 +51,25 @@ class UserUpdateIn(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=128)
 
 
+def _user_out(user: User) -> UserOut:
+    return UserOut(
+        id=user.id or 0,
+        username=user.username,
+        display_name=user.display_name,
+        role=user.role,
+        is_active=user.is_active,
+        last_login_at=user.last_login_at,
+        created_at=user.created_at,
+    )
+
+
 @router.get("", response_model=DataResponse[list[UserOut]], summary="账号列表")
 async def list_users(
     session: Annotated[AsyncSession, Depends(get_session)],
     _: Annotated[CurrentUser, Depends(require_owner)] = None,
 ) -> dict[str, Any]:
     """列出全部账号（只有 owner 能看）。"""
-    stmt = select(User).order_by(User.id)
-    users = list((await session.execute(stmt)).scalars().all())
-    return ok(
-        [
-            UserOut(
-                id=user.id or 0,
-                username=user.username,
-                display_name=user.display_name,
-                role=user.role,
-                is_active=user.is_active,
-                last_login_at=user.last_login_at,
-                created_at=user.created_at,
-            )
-            for user in users
-        ]
-    )
+    return ok([_user_out(user) for user in await admin_service.list_users(session)])
 
 
 @router.post(
@@ -90,49 +85,14 @@ async def create_user(
     _: Annotated[CurrentUser, Depends(require_owner)] = None,
 ) -> dict[str, Any]:
     """新建账号。用户名重复返回 409。"""
-    existing = (
-        await session.execute(select(User).where(User.username == payload.username.strip()))
-    ).scalar_one_or_none()
-    if existing is not None:
-        raise AppError(
-            ErrorCode.CONFLICT,
-            "这个登录名已经有了",
-            status_code=409,
-            detail={"field": "username"},
-        )
-
-    user = User(
-        username=payload.username.strip(),
+    user = await admin_service.create_user(
+        session,
+        username=payload.username,
         display_name=payload.display_name,
         role=payload.role,
-        password_hash=hash_password(payload.password),
-        is_active=True,
+        password=payload.password,
     )
-    session.add(user)
-    await session.commit()
-
-    return ok(
-        UserOut(
-            id=user.id or 0,
-            username=user.username,
-            display_name=user.display_name,
-            role=user.role,
-            is_active=user.is_active,
-            last_login_at=user.last_login_at,
-            created_at=user.created_at,
-        )
-    )
-
-
-async def _count_other_active_owners(session: AsyncSession, user_id: int) -> int:
-    """除指定账号外，还剩几个可用 owner。"""
-    return (
-        await session.execute(
-            select(func.count())
-            .select_from(User)
-            .where(User.role == "owner", User.is_active.is_(True), User.id != user_id)
-        )
-    ).scalar_one()
+    return ok(_user_out(user))
 
 
 @router.patch(
@@ -148,54 +108,13 @@ async def update_user(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """改账号状态或重置密码。"""
-    user = await session.get(User, user_id)
-    if user is None:
-        raise AppError(ErrorCode.NOT_FOUND, "找不到这个账号", status_code=404)
-
-    if payload.is_active is False:
-        if user.id == actor.id:
-            raise AppError(ErrorCode.INVALID_STATE, "不能禁用自己", status_code=400)
-        if user.role == "owner":
-            remaining = (
-                await session.execute(
-                    select(func.count())
-                    .select_from(User)
-                    .where(User.role == "owner", User.is_active.is_(True), User.id != user_id)
-                )
-            ).scalar_one()
-            if remaining == 0:
-                raise AppError(ErrorCode.INVALID_STATE, "不能禁用最后一个 owner", status_code=400)
-
-    if payload.role is not None and payload.role == "member" and user.role == "owner":
-        if await _count_other_active_owners(session, user_id) == 0:
-            raise AppError(
-                ErrorCode.INVALID_STATE,
-                "不能把最后一个 owner 改成 member",
-                status_code=400,
-            )
-
-    if payload.display_name is not None:
-        user.display_name = payload.display_name
-    if payload.role is not None:
-        user.role = payload.role
-    if payload.is_active is not None:
-        user.is_active = payload.is_active
-    if payload.password is not None:
-        user.password_hash = hash_password(payload.password)
-        user.failed_attempts = 0
-        user.locked_until = None
-
-    session.add(user)
-    await session.commit()
-
-    return ok(
-        UserOut(
-            id=user.id or 0,
-            username=user.username,
-            display_name=user.display_name,
-            role=user.role,
-            is_active=user.is_active,
-            last_login_at=user.last_login_at,
-            created_at=user.created_at,
-        )
+    user = await admin_service.update_user(
+        session,
+        user_id,
+        actor_id=actor.id,
+        display_name=payload.display_name,
+        is_active=payload.is_active,
+        role=payload.role,
+        password=payload.password,
     )
+    return ok(_user_out(user))

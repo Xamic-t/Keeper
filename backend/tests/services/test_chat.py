@@ -34,9 +34,9 @@ from tests.conftest import Account, rls_session
     ],
 )
 def test_detect_intent(text: str, has_image: bool, person_id: int | None, expected: str) -> None:
-    assert chat_service.detect_intent(
-        text=text, has_image=has_image, person_id=person_id
-    ) == expected
+    assert (
+        chat_service.detect_intent(text=text, has_image=has_image, person_id=person_id) == expected
+    )
 
 
 async def _person_with_fact(user: Account) -> int:
@@ -155,9 +155,7 @@ async def test_feed_text_returns_extracted_facts(single_user: Account, monkeypat
 
     async with rls_session(single_user.id) as session:
         facts = list(
-            (
-                await session.execute(select(Fact).where(Fact.source_id == result.raw_input_id))
-            )
+            (await session.execute(select(Fact).where(Fact.source_id == result.raw_input_id)))
             .scalars()
             .all()
         )

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.models.fact import Fact
 from app.models.input import ChatSegment, RawInput
@@ -42,6 +43,39 @@ class IngestResult:
     duplicate: bool = False
     existing_id: int | None = None
     error: str | None = None
+
+
+def validate_image_count(count: int) -> None:
+    """一次投喂的图片数量校验。"""
+    if count == 0:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "至少要传一张图", status_code=400)
+    if count > settings.max_upload_count:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            f"一次最多 {settings.max_upload_count} 张",
+            status_code=400,
+        )
+
+
+def build_upload_item(filename: str | None, content: bytes) -> UploadItem:
+    """校验大小与真实格式，生成上传项。"""
+    limit = settings.max_upload_mb * 1024 * 1024
+    if len(content) > limit:
+        raise AppError(
+            ErrorCode.FILE_TOO_LARGE,
+            f"单张不能超过 {settings.max_upload_mb}MB",
+            status_code=413,
+            detail={"max_mb": settings.max_upload_mb},
+        )
+    suffix = storage.sniff_image_suffix(content)
+    if suffix is None:
+        raise AppError(
+            ErrorCode.VALIDATION_ERROR,
+            "只支持 jpg / png / webp",
+            status_code=400,
+            detail={"filename": filename},
+        )
+    return UploadItem(filename=filename or "upload", content=content, suffix=suffix)
 
 
 async def _find_duplicate(session: AsyncSession, content_hash: str) -> RawInput | None:

@@ -35,14 +35,23 @@ echo "==> 跑数据库迁移"
 docker compose exec -T app uv run alembic upgrade head
 
 echo "==> 健康检查"
+healthy=0
 for _ in $(seq 1 20); do
   code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/api/health || true)
   if [ "$code" = "200" ]; then
-    echo "部署完成，接口正常。"
-    exit 0
+    healthy=1
+    break
   fi
   sleep 2
 done
+if [ "$healthy" != "1" ]; then
+  echo "健康检查没通过，看日志：docker compose logs -f app web" >&2
+  exit 1
+fi
 
-echo "健康检查没通过，看日志：docker compose logs -f app web" >&2
-exit 1
+echo "==> 检查 scheduler 是否在跑"
+if ! docker compose ps --status running --services | grep -qx scheduler; then
+  echo "scheduler 没起来，提醒任务不会触发。看日志：docker compose logs -f scheduler" >&2
+  exit 1
+fi
+echo "部署完成：API + scheduler + web 都在运行。"

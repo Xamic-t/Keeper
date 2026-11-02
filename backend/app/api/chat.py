@@ -14,12 +14,10 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
 from app.services import chat as chat_service
-from app.services.ingest import UploadItem
-from app.services.storage import sniff_image_suffix
+from app.services import ingest as ingest_service
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -54,36 +52,11 @@ async def chat(
     image: Annotated[UploadFile | None, File(description="jpg / png / webp，≤8MB")] = None,
 ) -> dict[str, Any]:
     """判意图 → 投喂走 ingest+抽取，查询走 facts/tags/ledger。"""
-    text = (message or "").strip()
-    if len(text) > 2000:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "一次最多 2000 字", status_code=400)
-
-    upload: UploadItem | None = None
+    text = chat_service.validate_message(message, has_image=image is not None)
+    upload = None
     if image is not None:
         limit = settings.max_upload_mb * 1024 * 1024
-        # 只读 limit+1：超了立刻能判断，不用把整个文件读进内存
-        content = await image.read(limit + 1)
-        if len(content) > limit:
-            raise AppError(
-                ErrorCode.FILE_TOO_LARGE,
-                f"单张不能超过 {settings.max_upload_mb}MB",
-                status_code=413,
-                detail={"max_mb": settings.max_upload_mb},
-            )
-        suffix = sniff_image_suffix(content)
-        if suffix is None:
-            raise AppError(
-                ErrorCode.VALIDATION_ERROR,
-                "只支持 jpg / png / webp",
-                status_code=400,
-                detail={"filename": image.filename},
-            )
-        upload = UploadItem(
-            filename=image.filename or "upload", content=content, suffix=suffix
-        )
-
-    if not text and upload is None:
-        raise AppError(ErrorCode.VALIDATION_ERROR, "至少说一句或发一张图", status_code=400)
+        upload = ingest_service.build_upload_item(image.filename, await image.read(limit + 1))
 
     result = await chat_service.reply_to(
         session, user.id, text=text, person_id=person_id, image=upload

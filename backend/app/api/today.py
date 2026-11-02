@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session
 from app.services import today as today_service
+from app.services.today import TodayView
 
 router = APIRouter(prefix="/today", tags=["today"])
 
@@ -54,35 +55,37 @@ class TodayOut(BaseModel):
     degraded: bool = False
 
 
+def _today_out(view: TodayView) -> TodayOut:
+    """把 service 的视图映射成 HTTP 响应模型。"""
+    preview = view.pending_preview
+    return TodayOut(
+        date=view.date,
+        tasks=[
+            TaskItemOut(
+                type=item.type,
+                title=item.title,
+                subtitle=item.subtitle,
+                person_id=item.person_id,
+                source_id=item.source_id,
+                due=item.due,
+                priority=item.priority,
+                unsent=item.unsent,
+                unsent_reason=item.unsent_reason,
+            )
+            for item in view.tasks
+        ],
+        tasks_more=view.tasks_more,
+        pending_count=view.pending_count,
+        pending_preview=PendingPreviewOut(**preview) if preview else None,
+        recent=[RecentOut(**item) for item in view.recent],
+        degraded=view.degraded,
+    )
+
+
 @router.get("", response_model=DataResponse[TodayOut], summary="今日页")
 async def get_today(
     user: Annotated[CurrentUser, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """一次请求返回今日页全部数据：任务、待确认数量、最近动态。"""
-    view = await today_service.get_today(session, user.id)
-    preview = view.pending_preview
-    return ok(
-        TodayOut(
-            date=view.date,
-            tasks=[
-                TaskItemOut(
-                    type=item.type,
-                    title=item.title,
-                    subtitle=item.subtitle,
-                    person_id=item.person_id,
-                    source_id=item.source_id,
-                    due=item.due,
-                    priority=item.priority,
-                    unsent=item.unsent,
-                    unsent_reason=item.unsent_reason,
-                )
-                for item in view.tasks
-            ],
-            tasks_more=view.tasks_more,
-            pending_count=view.pending_count,
-            pending_preview=(PendingPreviewOut(**preview) if preview else None),
-            recent=[RecentOut(**item) for item in view.recent],
-            degraded=view.degraded,
-        )
-    )
+    return ok(_today_out(await today_service.get_today(session, user.id)))

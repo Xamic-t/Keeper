@@ -86,8 +86,10 @@ async def test_b_cannot_read_a_rows_through_rls(two_users: tuple[Account, Accoun
     async with rls_session(user_b.id) as session:
         for model in (Fact, Tag, Event, Reminder, NotificationChannel):
             rows = (
-                await session.execute(select(model).where(model.user_id == user_a.id))
-            ).scalars().all()
+                (await session.execute(select(model).where(model.user_id == user_a.id)))
+                .scalars()
+                .all()
+            )
             assert list(rows) == [], f"{model.__tablename__} 泄露了 A 的行"
 
     assert ids["person"] > 0

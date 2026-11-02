@@ -11,12 +11,10 @@ from fastapi import APIRouter, Depends, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
 from app.models.notification import NotificationChannel
-from app.models.user import User
-from app.services import notify as notify_service
+from app.services import settings as settings_service
 
 router = APIRouter(tags=["settings"])
 
@@ -69,11 +67,10 @@ async def get_settings(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """返回用户设置与已配置的推送通道。"""
-    row = await session.get(User, user.id)
-    channels = await notify_service.list_channels(session, user.id)
+    keep_images, channels = await settings_service.load(session, user.id)
     return ok(
         SettingsOut(
-            keep_original_images=bool(row.keep_original_images) if row else True,
+            keep_original_images=keep_images,
             channels=[_channel_out(item) for item in channels],
         )
     )
@@ -87,19 +84,12 @@ async def update_settings(
     _: Annotated[None, Depends(require_csrf)] = None,
 ) -> dict[str, Any]:
     """改设置。目前只有"是否保留原图"这一项。"""
-    row = await session.get(User, user.id)
-    if row is None:
-        raise AppError(ErrorCode.UNAUTHENTICATED, "请先登录", status_code=401)
-
-    if payload.keep_original_images is not None:
-        row.keep_original_images = payload.keep_original_images
-        session.add(row)
-        await session.commit()
-
-    channels = await notify_service.list_channels(session, user.id)
+    keep_images, channels = await settings_service.update_keep_images(
+        session, user.id, payload.keep_original_images
+    )
     return ok(
         SettingsOut(
-            keep_original_images=row.keep_original_images,
+            keep_original_images=keep_images,
             channels=[_channel_out(item) for item in channels],
         )
     )
@@ -115,7 +105,7 @@ async def list_channels(
     user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> dict[str, Any]:
     """列出推送通道（不返回密钥原文）。"""
-    channels = await notify_service.list_channels(session, user.id)
+    channels = await settings_service.list_channels(session, user.id)
     return ok([_channel_out(item) for item in channels])
 
 
@@ -132,26 +122,15 @@ async def create_channel(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """新增一条推送通道。webhook / token 存进 config，列表接口不显示。"""
-    config: dict[str, Any] = {}
-    if payload.kind == "wecom":
-        if not payload.webhook:
-            raise AppError(ErrorCode.VALIDATION_ERROR, "企微通道要填 webhook", status_code=400)
-        config["webhook"] = payload.webhook
-    else:
-        if not payload.token:
-            raise AppError(ErrorCode.VALIDATION_ERROR, "PushPlus 通道要填 token", status_code=400)
-        config["token"] = payload.token
-
-    channel = NotificationChannel(
-        user_id=user.id,
+    channel = await settings_service.create_channel(
+        session,
+        user.id,
         kind=payload.kind,
         name=payload.name,
-        config=config,
         priority=payload.priority,
-        is_active=True,
+        webhook=payload.webhook,
+        token=payload.token,
     )
-    session.add(channel)
-    await session.commit()
     return ok(_channel_out(channel))
 
 
@@ -166,11 +145,7 @@ async def delete_channel(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> Response:
     """删掉一条通道。"""
-    channel = await session.get(NotificationChannel, channel_id)
-    if channel is None:
-        raise AppError(ErrorCode.NOT_FOUND, "找不到这个通道", status_code=404)
-    await session.delete(channel)
-    await session.commit()
+    await settings_service.delete_channel(session, channel_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -185,17 +160,8 @@ async def test_channel(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
     """往这条通道发一条测试消息。失败返回 ok=false，不抛异常。"""
-    channel = await session.get(NotificationChannel, channel_id)
-    if channel is None:
-        raise AppError(ErrorCode.NOT_FOUND, "找不到这个通道", status_code=404)
-
-    message = notify_service.Outgoing(
-        title="Keeper 测试推送",
-        markdown="这是一条测试消息，收到就说明通道通了。",
-        text="这是一条测试消息，收到就说明通道通了。",
-    )
-    ok_sent = await notify_service.send_via(channel, message)
-    return ok(TestResultOut(ok=ok_sent, channel=channel.name))
+    sent, name = await settings_service.test_channel(session, channel_id)
+    return ok(TestResultOut(ok=sent, channel=name))
 
 
 SettingsOut.model_rebuild()

@@ -11,7 +11,7 @@
 import httpx
 import pytest
 
-from app.api import admin as admin_api
+from app.services import admin as admin_service
 from tests.conftest import Account, create_user, csrf_headers, delete_users, login
 
 
@@ -66,10 +66,11 @@ async def test_cannot_demote_last_owner_to_member(
 
     不真改现有 owner 行：测试库里有用户真实账号，负例用 monkeypatch 隔离。
     """
+
     async def no_other_owner(session, user_id: int) -> int:
         return 0
 
-    monkeypatch.setattr(admin_api, "_count_other_active_owners", no_other_owner)
+    monkeypatch.setattr(admin_service, "_count_other_active_owners", no_other_owner)
     csrf_token = await login(client, owner)
 
     response = await client.patch(

@@ -71,11 +71,7 @@ async def test_clear_previous_keeps_confirmed_facts(single_user: Account) -> Non
 
     async with rls_session(single_user.id) as session:
         facts = (
-            (
-                await session.execute(
-                    select(Fact).where(Fact.source_id == raw_id).order_by(Fact.id)
-                )
-            )
+            (await session.execute(select(Fact).where(Fact.source_id == raw_id).order_by(Fact.id)))
             .scalars()
             .all()
         )

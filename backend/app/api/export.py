@@ -7,35 +7,17 @@
   · 响应里带一句提醒，前端要显著提示用户
 """
 
-import csv
-import io
-import json
-import re
-import tempfile
-import zipfile
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
 from app.deps import CurrentUser, get_current_user, get_session
-from app.models.person import Person
-from app.services import person as person_service
+from app.services import export as export_service
 
 router = APIRouter(prefix="/export", tags=["export"])
-
-# ZIP 条目名里只允许：文字、数字、下划线、连字符、汉字。其它一律换成下划线。
-# 不这么干，昵称里写 `../../etc/x` 就能在解压时跳出导出目录（Zip Slip，评审 P2-12）。
-_UNSAFE_NAME = re.compile(r"[^\w\u4e00-\u9fff-]")
-
-
-def safe_name(text: str, fallback: str = "person") -> str:
-    """把人名清洗成可以放进 ZIP 路径的片段。纯符号的名字退化成 fallback。"""
-    cleaned = _UNSAFE_NAME.sub("_", text or "").strip("_")
-    return cleaned[:80] or fallback
 
 
 @router.get("", summary="全量导出 ZIP")
@@ -44,53 +26,10 @@ async def export_all(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> StreamingResponse:
     """把所有数据打包成 ZIP 下载。"""
-    stmt = select(Person).order_by(Person.id)
-    persons = list((await session.execute(stmt)).scalars().all())
-
-    # 超过 1MB 就落临时磁盘文件，不把整个 ZIP 堆在内存里。
-    # 响应结束后由 BackgroundTask 关文件；打包中途失败要在这里关掉，别留句柄。
-    buffer = tempfile.SpooledTemporaryFile(max_size=1024 * 1024, mode="w+b")
-    try:
-        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-            index: list[dict[str, Any]] = []
-            for person in persons:
-                if person.id is None:
-                    continue
-                data = await person_service.export_person(session, person.id)
-                archive.writestr(
-                    f"persons/{person.id}-{safe_name(person.nickname)}.json",
-                    json.dumps(data, ensure_ascii=False, indent=2),
-                )
-                index.append(
-                    {
-                        "id": person.id,
-                        "nickname": person.nickname,
-                        "facts": len(data["facts"]),
-                        "ledger": len(data["ledger"]),
-                        "events": len(data["events"]),
-                        "tags": len(data["tags"]),
-                    }
-                )
-
-            csv_buffer = io.StringIO()
-            writer = csv.DictWriter(
-                csv_buffer, fieldnames=["id", "nickname", "facts", "ledger", "events", "tags"]
-            )
-            writer.writeheader()
-            writer.writerows(index)
-            archive.writestr("index.csv", csv_buffer.getvalue())
-            archive.writestr(
-                "README.txt",
-                "Keeper 全量导出。index.csv 是名单，persons/ 下是每个人的完整档案 JSON。\n",
-            )
-
-        buffer.seek(0)
-        return StreamingResponse(
-            buffer,
-            media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="keeper-export.zip"'},
-            background=BackgroundTask(buffer.close),
-        )
-    except Exception:
-        buffer.close()
-        raise
+    buffer = await export_service.build_archive(session)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="keeper-export.zip"'},
+        background=BackgroundTask(buffer.close),
+    )

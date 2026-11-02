@@ -21,46 +21,24 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
 from app.db import SessionLocal
-from app.models.user import User
+from app.models.ledger import Ledger
+from app.services import assistant as assistant_service
 from app.services import ledger as ledger_service
 from app.services import person as person_service
 from app.services import profile as profile_service
 from app.services import today as today_service
+from app.services.person import PersonDetailData
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
 
 
 # ── 认证 ─────────────────────────────────────────────────
-async def _resolve_user(session: AsyncSession) -> User:
-    """把 service token 映射到某个账号。"""
-    expected = settings.assistant_token
-    if expected is None:
-        raise AppError(
-            ErrorCode.INTERNAL_ERROR,
-            "助理接口未启用：没有配置 ASSISTANT_TOKEN",
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-
-    stmt = select(User).where(
-        User.username == settings.assistant_username, User.is_active.is_(True)
-    )
-    user = (await session.execute(stmt)).scalars().first()
-    if user is None:
-        raise AppError(
-            ErrorCode.INTERNAL_ERROR,
-            f"助理账号 {settings.assistant_username} 不存在或已禁用",
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    return user
-
-
 async def assistant_session(
     token: Annotated[str | None, Header(alias="X-Assistant-Token")] = None,
 ) -> AsyncGenerator[AsyncSession]:
@@ -85,7 +63,7 @@ async def assistant_session(
         )
 
     async with SessionLocal() as probe:
-        user = await _resolve_user(probe)
+        user = await assistant_service.resolve_user(probe)
         user_id = user.id or 0
 
     async with SessionLocal() as session:
@@ -230,9 +208,7 @@ async def assistant_person(session: Session, person_id: int) -> dict[str, Any]:
     """一个人的身份、关系、标签、四类计数。**不含事实列表**（那是另一个接口）。"""
     detail = await person_service.get_person_detail(session, person_id)
     relationship = detail.relationship
-    birthday = (
-        relationship.birthday_solar.isoformat() if relationship.birthday_solar else None
-    )
+    birthday = relationship.birthday_solar.isoformat() if relationship.birthday_solar else None
     return ok(
         PersonDetailOut(
             id=detail.person.id or 0,
@@ -283,6 +259,27 @@ async def assistant_facts(session: Session, person_id: int) -> dict[str, Any]:
     )
 
 
+def _ledger_out(rows: list[Ledger], detail: PersonDetailData, person_id: int) -> LedgerOut:
+    """把逐笔明细 + 人员汇总映射成助理响应。"""
+    return LedgerOut(
+        person_id=person_id,
+        total_in=str(detail.relationship.total_in),
+        total_out=str(detail.relationship.total_out),
+        unsettled=sum(1 for row in rows if row.settled_at is None),
+        recent=[
+            LedgerItemOut(
+                direction=row.direction,
+                kind=row.kind,
+                amount=str(row.amount),
+                occurred_at=row.occurred_at.isoformat(),
+                due_date=row.due_date.isoformat() if row.due_date else None,
+                note=row.note,
+            )
+            for row in rows
+        ],
+    )
+
+
 @router.get("/ledger", response_model=DataResponse[LedgerOut], summary="某人的往来汇总")
 async def assistant_ledger(
     session: Session,
@@ -296,22 +293,4 @@ async def assistant_ledger(
     """
     rows, _total = await ledger_service.list_ledger(session, person_id, offset=0, limit=limit)
     detail = await person_service.get_person_detail(session, person_id)
-    return ok(
-        LedgerOut(
-            person_id=person_id,
-            total_in=str(detail.relationship.total_in),
-            total_out=str(detail.relationship.total_out),
-            unsettled=sum(1 for row in rows if row.settled_at is None),
-            recent=[
-                LedgerItemOut(
-                    direction=row.direction,
-                    kind=row.kind,
-                    amount=str(row.amount),
-                    occurred_at=row.occurred_at.isoformat(),
-                    due_date=row.due_date.isoformat() if row.due_date else None,
-                    note=row.note,
-                )
-                for row in rows
-            ],
-        )
-    )
+    return ok(_ledger_out(rows, detail, person_id))

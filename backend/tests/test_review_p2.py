@@ -10,9 +10,9 @@ P2-8  提醒模板里的 {tags} 永远渲染成空数组
 import base64
 import json
 
-from app.api.export import safe_name
 from app.models.fact import Tag
 from app.services import reminder as reminder_service
+from app.services.export import safe_name
 from app.services.person import create_person
 from app.services.vision import _image_part
 from tests.conftest import Account, rls_session
