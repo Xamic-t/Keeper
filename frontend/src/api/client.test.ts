@@ -67,6 +67,30 @@ describe('api client', () => {
     expect(unauthorized).not.toHaveBeenCalled()
   })
 
+  it('写操作自动带 X-CSRF-Token', async () => {
+    document.cookie = 'csrf=test-csrf; path=/'
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ data: { ok: true } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.patch('/todos/1', { status: 'done' })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/todos/1',
+      expect.objectContaining({
+        method: 'PATCH',
+        headers: expect.objectContaining({ 'X-CSRF-Token': 'test-csrf' }),
+      }),
+    )
+    document.cookie = 'csrf=; Max-Age=0; path=/'
+  })
+
+  it('204 返回 undefined，不当 JSON 解析', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(api.delete('/todos/1')).resolves.toBeUndefined()
+  })
+
   it('AbortError 转成可读的 REQUEST_TIMEOUT', async () => {
     vi.useFakeTimers()
     const fetchMock = vi.fn().mockImplementation(

@@ -144,3 +144,41 @@ def test_create_user_role_helper_still_works() -> None:
         assert account.id > 0
     finally:
         delete_users(account.id)
+
+
+async def test_ledger_requires_person_and_returns_totals(
+    client: httpx.AsyncClient, assistant_as: Account
+) -> None:
+    """ledger 必须带 person_id；不带返回 400，带上才能回答"我跟这个人还差多少"。"""
+    from datetime import date
+    from decimal import Decimal
+
+    from app.services import ledger as ledger_service
+
+    person_id = await _person(assistant_as, "往来客户")
+    async with rls_session(assistant_as.id) as session:
+        await ledger_service.create_ledger(
+            session,
+            assistant_as.id,
+            person_id=person_id,
+            direction="out",
+            kind="gift",
+            amount=Decimal("300.00"),
+            occurred_at=date.today(),
+            note="助理读往来用例",
+        )
+
+    missing = await client.get(
+        "/api/assistant/ledger", headers={"X-Assistant-Token": TOKEN}
+    )
+    assert missing.status_code == 400
+
+    response = await client.get(
+        f"/api/assistant/ledger?person_id={person_id}",
+        headers={"X-Assistant-Token": TOKEN},
+    )
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["person_id"] == person_id
+    assert data["total_out"] in {"300.00", "300.000"}
+    assert data["recent"][0]["note"] == "助理读往来用例"
