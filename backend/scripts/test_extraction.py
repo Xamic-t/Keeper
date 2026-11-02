@@ -119,12 +119,12 @@ async def _find_user(username: str | None, *, allow_owner: bool = False) -> tupl
         if user.role == "owner" and not allow_owner:
             raise SystemExit(
                 f"拒绝执行：解析到的账号 {user.username!r} 是 owner。\n"
-                "这个脚本会真的写事实 / 事件 / 往来，落在 owner 上就是往你自己的档案里灌测试数据。\n\n"
+                "这个脚本会真的写事实 / 事件 / 往来，"
+                "落在 owner 上就是往你自己的档案里灌测试数据。\n\n"
                 "请二选一：\n"
                 "  ① 用隔离账号跑（推荐）：先建一个测试账号，然后 --user <测试账号>\n"
                 "  ② 明确知道自己在做什么：加 --allow-owner\n"
             )
-
         return user.id, user.username, user.role
 
 

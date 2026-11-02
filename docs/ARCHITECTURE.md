@@ -609,8 +609,18 @@ backend/
 │   └── jobs/             # 定时任务
 ├── prompts/              # 提示词（带版本号）
 ├── alembic/              # 迁移
+├── scripts/              # 需要 import app 的运维脚本（抽取验收、文档漂移、备份校验）
 └── tests/
+
+scripts/                  # 仓库根：不 import app 的 shell 运维脚本（部署预检）
 ```
+
+**两个 `scripts/` 的分工（2026-11-03 明确）**：
+
+| 位置 | 内容 | 判据 |
+|---|---|---|
+| `backend/scripts/` | 要 `import app`、要连库、要跑 service 的脚本（`test_extraction.py`、`check_api_docs.py`、`verify_backup.sh`） | 依赖 Python 环境 |
+| `scripts/`（根） | 只看文件与配置的 shell 脚本（`preflight_deploy.sh`） | 在裸服务器上也能跑，不要求装 Python |
 
 ### 11.2 三条分层纪律（带违规判断标准）
 
@@ -644,6 +654,7 @@ backend/
 | `alembic/versions/` | 迁移脚本 | 每个版本一个文件，顶部写清对应文档与回滚影响 | 手工改库留下的临时 SQL | Alembic | `alembic/versions/0001–0006` | 【工具】 |
 | `prompts/` | 提示词 | 带版本号的 prompt 文件（`v1_extract.md`） | prompt 字符串常量散落在代码里 | 无 | `prompts/v1_extract.md`、`v2_extract.md` | 【项目】 |
 | `tests/` | 测试 | `tests/services/` 单测、`tests/api/` 接口测试 | 依赖真实网络的测试 | `pytest` + `TestClient` | `tests/services/`、`tests/api/`（当前 198 条，见 `docs/25`） | 【工具】 |
+| `scripts/`（根） | 运维脚本 | 不 import app 的 shell 检查（部署预检、备份恢复） | 业务逻辑、需要 Python 环境的脚本（放 `backend/scripts/`） | 无（纯 bash） | `preflight_deploy.sh` | 【项目】 |
 
 > 行数只作规模参考，**以文件为准**；接口/表数量也不要手抄进新文档，统一指向 `docs/06`、`docs/07` 或 OpenAPI。
 
@@ -1396,6 +1407,7 @@ Python 从 Postgres 读
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
+| 2026-11-03 | v2.7 | ① 11.1/11.3 补仓库根 `scripts/` 目录与「两个 scripts 的分工」——N 批次新增 `preflight_deploy.sh`，属事实性目录说明，不改任何要求；② 无其它口径变更（RLS 全表审计通过，未改设计） |
 | 2026-11-02 | v2.6 | D1-A/D2-A/D3-A/D4-A/D5-A 决策落地：PWA 保留为 V1；Harness UI 正式采用 iframe（V1）；API+Scheduler 双进程转正；新增 8.12 离线回放 fixture 模式；管理 UI 纳入 V1；7.6.1 补 vite-plugin-pwa |
 | 2026-11-02 | v2.5 | 架构符合性审计：恢复 v2.4 擅自删除的 PWA 要求与 Harness "自带 Web UI ❌" 原约束（代码违背处列 `docs/26` 待决策）；给 Scheduler 双进程变更加"待追认"标记；新增 8.11 测试分层与架构约束测试说明 |
 | 2026-11-02 | v2.4 | 同步交付后架构：① 第 6 节部署拓扑改为 API + Scheduler 双进程 + 可选 Harness 侧车；② 7.6/19.3 校正 V1 为 13 张表、pgvector V1 未启用；③ 7.6.1/8.1 补 Vitest / Playwright / pytest-cov 与 `gen:types` 离线生成；④ 3 处权限描述从"待实现"改为 `require_owner` 已落地；⑤ 17 节补 SECRET_KEY 强校验、启动查 `pg_roles`、助理 token 只进 sessionStorage；⑥ 19.7.6 修正"自带 Web UI 不用"为 iframe 嵌入；⑦ 20 节文档地图与 22 节变更纪律更新 |
