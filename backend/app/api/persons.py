@@ -357,9 +357,13 @@ async def delete_person(
 async def get_timeline(
     person_id: int,
     session: Annotated[AsyncSession, Depends(get_session)],
-    limit: int = 50,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    """事实、往来、事件混排的时间线，新的在前。"""
+    """事实、往来、事件混排的时间线，新的在前。
+
+    `limit` 必须封顶：不封顶时 `?limit=99999` 会把一个人全部历史拉出来，
+    前端一次渲染几万条会卡死，数据库也白读。
+    """
     return ok(await person_service.build_timeline(session, person_id, limit=limit))
 
 

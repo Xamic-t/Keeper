@@ -416,3 +416,24 @@ async def test_admin_list_hides_password(client: httpx.AsyncClient) -> None:
         assert "password" not in response.text
     finally:
         delete_users(owner.id)
+
+
+async def test_timeline_limit_is_capped(client: httpx.AsyncClient, account: Account) -> None:
+    """`?limit=99999` 必须被拒，而不是把一个人全部历史拉出来。
+
+    状态码按 ARCHITECTURE §15.4：Pydantic 校验失败统一 400 + VALIDATION_ERROR
+    （不是框架默认的 422），这样前端只用一套错误处理。
+    """
+    person_id = await _person(account)
+    await login(client, account)
+
+    too_big = await client.get(f"/api/persons/{person_id}/timeline", params={"limit": 99999})
+    assert too_big.status_code == 400
+    assert too_big.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    zero = await client.get(f"/api/persons/{person_id}/timeline", params={"limit": 0})
+    assert zero.status_code == 400
+
+    # 封顶值本身必须能用，别把自己封死了
+    boundary = await client.get(f"/api/persons/{person_id}/timeline", params={"limit": 200})
+    assert boundary.status_code == 200

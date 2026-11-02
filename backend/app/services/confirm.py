@@ -295,20 +295,29 @@ async def list_confirmations(session: AsyncSession) -> list[ConfirmationGroup]:
     )
 
     if pending_person:
+        # 一次取回这批材料的全部对话片段，在内存里取每组的第一句。
+        # 原来是每条材料再查一次（20 条 = 20 次查询）；这里一次查询拿回来，
+        # 材料最多 20 条、每条几句，内存里过一遍的代价可以忽略。
+        raw_input_ids = [item.id for item in pending_person if item.id is not None]
+        segment_rows = (
+            await session.execute(
+                select(ChatSegment.raw_input_id, ChatSegment.content)
+                .where(ChatSegment.raw_input_id.in_(raw_input_ids))
+                .order_by(ChatSegment.raw_input_id, ChatSegment.seq)
+            )
+        ).all()
+        # 结果已按 (raw_input_id, seq) 排好，setdefault 保留的就是 seq 最小那句
+        first_text: dict[int, str] = {}
+        for raw_input_id, content in segment_rows:
+            first_text.setdefault(raw_input_id, content)
+
         items: list[ConfirmationItem] = []
         for raw_input in pending_person:
-            segment = (
-                await session.execute(
-                    select(ChatSegment)
-                    .where(ChatSegment.raw_input_id == raw_input.id)
-                    .order_by(ChatSegment.seq)
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+            content = first_text.get(raw_input.id)
             items.append(
                 ConfirmationItem(
                     id=raw_input.id or 0,
-                    content=segment.content if segment else "（这条材料没识别出对话）",
+                    content=content if content is not None else "（这条材料没识别出对话）",
                     category="unassigned",
                     confidence=0.0,
                     evidence=None,

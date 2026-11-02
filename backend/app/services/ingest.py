@@ -95,6 +95,10 @@ async def ingest_images(
         raise AppError(ErrorCode.NOT_FOUND, "找不到这个人", status_code=404)
 
     results: list[IngestResult] = []
+    # 已经落盘的文件路径。commit 失败时要把它们删掉——否则磁盘上留一堆
+    # 没有任何 raw_inputs 行指向的截图，既占空间，也不符合"删就删干净"的承诺。
+    written_paths: list[str] = []
+
     for item in items:
         content_hash = storage.compute_hash(item.content)
         duplicate = await _find_duplicate(session, content_hash)
@@ -126,6 +130,7 @@ async def ingest_images(
             raw_input.file_path = storage.save_upload(
                 user_id, raw_input.id or 0, item.content, item.suffix
             )
+            written_paths.append(raw_input.file_path)
         except OSError as exc:
             # 单张存盘失败不影响其他张
             logger.warning("save upload failed user_id=%s error=%s", user_id, type(exc).__name__)
@@ -149,7 +154,17 @@ async def ingest_images(
             )
         )
 
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception:
+        # commit 失败 = 这批 raw_inputs 一行都没进去，刚落盘的图全是孤儿。
+        # 先回滚（连接可能处于失败事务里），再删文件，最后照常抛出去，
+        # 让调用方看到真实错误，而不是"上传成功但库里查不到"。
+        await session.rollback()
+        for path in written_paths:
+            storage.delete_file(path)
+        logger.warning("ingest commit failed, cleaned %d orphan files", len(written_paths))
+        raise
     return results
 
 

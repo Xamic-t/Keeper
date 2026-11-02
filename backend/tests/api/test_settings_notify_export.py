@@ -142,3 +142,20 @@ async def test_export_zip_contains_only_own_person(
         assert person_files[0].count("/") == 1
         data = json.loads(archive.read(person_files[0]))
         assert data["person"]["nickname"] == "导出/测试"
+
+
+async def test_settings_patch_requires_csrf(client: httpx.AsyncClient, account: Account) -> None:
+    """写设置必须过 CSRF，且和全项目用同一种挂法（router dependencies）。
+
+    以前这里是 `_ : Annotated[None, Depends(require_csrf)] = None`——功能上没错，
+    但和其它写接口写法不一致：看路由签名的人会以为"这个接口不需要 CSRF"，
+    新接口照抄就容易漏。统一挂到 `dependencies=[Depends(require_csrf)]`。
+    """
+    await login(client, account)
+
+    blocked = await client.patch("/api/settings", json={"keep_original_images": False})
+    assert blocked.status_code == 403
+    assert blocked.json()["error"]["code"] == "FORBIDDEN"
+
+    unchanged = await client.get("/api/settings")
+    assert unchanged.json()["data"]["keep_original_images"] is True

@@ -76,12 +76,16 @@ async def get_settings(
     )
 
 
-@router.patch("/settings", response_model=DataResponse[SettingsOut], summary="改设置")
+@router.patch(
+    "/settings",
+    response_model=DataResponse[SettingsOut],
+    summary="改设置",
+    dependencies=[Depends(require_csrf)],
+)
 async def update_settings(
     payload: SettingsIn,
     user: Annotated[CurrentUser, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
-    _: Annotated[None, Depends(require_csrf)] = None,
 ) -> dict[str, Any]:
     """改设置。目前只有"是否保留原图"这一项。"""
     keep_images, channels = await settings_service.update_keep_images(
