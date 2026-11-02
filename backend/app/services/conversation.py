@@ -30,9 +30,11 @@ from app.core.errors import AppError, ErrorCode
 from app.models.chat import ChatMessage
 from app.models.event import Event
 from app.models.fact import Fact
+from app.models.input import RawInput
 from app.models.person import Person
 from app.models.todo import Todo
 from app.services import event as event_service
+from app.services import extract as extract_service
 from app.services import ingest as ingest_service
 from app.services import todo as todo_service
 from app.services.ingest import UploadItem
@@ -53,6 +55,29 @@ MAX_ACTIONS_PER_TURN = 3
 SNAPSHOT_LIMIT = 20
 
 ALLOWED_ACTIONS = {"create_todo", "create_event", "add_fact"}
+
+# 纯应答词。用户只回了这些，说明他在确认/让我们继续，**不是在提新要求**。
+# 模型有时会顺着上一轮的历史再执行一遍动作（实测"嗯"会重复建待办），
+# 机器侧兜一道：这种消息不执行任何动作，只回话。
+_ACK_WORDS = {
+    "嗯",
+    "嗯嗯",
+    "好",
+    "好的",
+    "好嘞",
+    "行",
+    "可以",
+    "收到",
+    "谢谢",
+    "谢了",
+    "知道了",
+    "明白",
+    "对的",
+    "对",
+    "ok",
+    "okay",
+    "thanks",
+}
 ALLOWED_EVENT_TYPES = {"birthday", "payment_due", "festival", "custom"}
 ALLOWED_CATEGORIES = {"permanent", "preference", "situation", "taboo", "mood", "structure"}
 
@@ -96,8 +121,9 @@ async def build_snapshot(session: AsyncSession) -> dict[str, Any]:
 
     故意**不带**事实原文：事实可能几十条，塞进去既费 token 又容易让模型拿旧信息
     瞎答。要具体某人的事实，让模型用 `ask` 的方式不行——V1 就是靠这份快照答。
-    所以这里给的是"人名 + 标签 + 最近的日子 + 今天待办"，详细事实等用户问具体人时
-    由 `answer_query` 那条老路径兜底（本服务也复用它，见 `_person_facts_brief`）。
+    所以这里给的是"人名 + 别名 + 未来 7 天的日子 + 今天该做的待办"。
+    用户问某个人具体喜好时，模型只能说"我这儿没记着"——这是刻意的：
+    宁可说不知道，也不要把 20 个人的几十条事实全塞进上下文让它自由发挥。
     """
     today = local_today()
 
@@ -376,6 +402,12 @@ async def execute_actions(
 # ── 一轮对话 ──────────────────────────────────────────────
 
 
+def is_acknowledgement(text: str) -> bool:
+    """这句话是不是纯应答（"嗯""好的""收到"）。是的话不执行任何动作。"""
+    cleaned = (text or "").strip().strip("。．.！!，,、~～ ")
+    return cleaned.lower() in _ACK_WORDS
+
+
 def _validate(text: str, has_image: bool) -> str:
     cleaned = (text or "").strip()
     if len(cleaned) > MAX_MESSAGE_CHARS:
@@ -405,13 +437,9 @@ async def _feed_image(
         return None, "（用户发了一张图，但没存下）"
 
     # 抽取自己开 session，跑完再回查（和 chat.py 里同一套处理）
-    from app.services import extract as extract_service
-
     await extract_service.extract_from_raw_input(raw_input_id, user_id)
     await session.commit()
     session.expire_all()
-
-    from app.models.input import RawInput
 
     raw_input = await session.get(RawInput, raw_input_id)
     if raw_input is None:
@@ -436,14 +464,76 @@ async def _feed_image(
     return raw_input_id, "（用户发了一张截图，抽出来这些，已进确认队列）\n" + "\n".join(lines)
 
 
+async def _retry_turn(session: AsyncSession, user_id: int, message_id: int) -> TurnResult:
+    """重试上一轮：复用已落库的用户消息，只重跑"拼上下文 → 调模型 → 执行动作"。"""
+    user_message = await session.get(ChatMessage, message_id)
+    if user_message is None or user_message.role != "user":
+        raise AppError(ErrorCode.NOT_FOUND, "找不到这条消息，重新发一条吧", status_code=404)
+
+    snapshot = await build_snapshot(session)
+    history = [item for item in await _history(session) if item.id != user_message.id]
+    messages = build_messages(render_prompt(snapshot), history, user_message.content or "")
+
+    try:
+        reply = await vision.converse(messages)
+    except AppError as exc:
+        raise AppError(
+            exc.code,
+            exc.message,
+            status_code=exc.status_code,
+            detail={**exc.detail, "user_message_id": user_message.id},
+        ) from exc
+
+    data = reply.parsed
+    reply_text = str(data.get("reply") or "").strip()
+    if not reply_text:
+        raise AppError(
+            ErrorCode.AI_UPSTREAM_ERROR,
+            "模型没有给出回复",
+            status_code=502,
+            detail={"user_message_id": user_message.id},
+        )
+
+    raw_actions = data.get("actions")
+    actions = raw_actions if isinstance(raw_actions, list) else []
+    if is_acknowledgement(user_message.content or ""):
+        actions = []
+    results, _rejected = await execute_actions(session, user_id, actions)
+
+    assistant_message = ChatMessage(
+        user_id=user_id,
+        role="assistant",
+        content=reply_text,
+        actions=[item.as_dict() for item in results],
+    )
+    session.add(assistant_message)
+    await session.commit()
+
+    return TurnResult(
+        reply=reply_text,
+        actions=[item.as_dict() for item in results],
+        user_message_id=user_message.id,
+        assistant_message_id=assistant_message.id,
+        raw_input_id=user_message.image_raw_input_id,
+    )
+
+
 async def run_turn(
     session: AsyncSession,
     user_id: int,
     *,
     text: str = "",
     image: UploadItem | None = None,
+    reuse_user_message_id: int | None = None,
 ) -> TurnResult:
-    """一轮对话：落用户消息 → 调模型 → 执行动作 → 落助手消息。"""
+    """一轮对话：落用户消息 → 调模型 → 执行动作 → 落助手消息。
+
+    `reuse_user_message_id`：前端"重试"时传回来。上一次模型挂了，但用户那句话
+    已经落库了；重试再插一条就会出现两个一模一样的绿气泡。所以重试直接复用那一条。
+    """
+    if reuse_user_message_id is not None:
+        return await _retry_turn(session, user_id, reuse_user_message_id)
+
     cleaned = _validate(text, image is not None)
 
     raw_input_id: int | None = None
@@ -474,9 +564,19 @@ async def run_turn(
 
     try:
         reply = await vision.converse(messages)
-    except AppError:
-        logger.warning("assistant model failed user_id=%s", user_id)
-        raise
+    except AppError as exc:
+        logger.warning("assistant model failed user_id=%s code=%s", user_id, exc.code)
+        # 把用户消息 id 带出去：前端重试时复用它，避免会话里出现两条一样的消息
+        raise AppError(
+            exc.code,
+            exc.message,
+            status_code=exc.status_code,
+            detail={**exc.detail, "user_message_id": user_message.id},
+        ) from exc
+
+    if reply.parsed.get("degraded"):
+        # 兜底路径：模型没给 JSON，我们只要到了一句话。动作必然为空，这里显式记一笔
+        logger.info("assistant reply degraded user_id=%s", user_id)
 
     data = reply.parsed
     reply_text = str(data.get("reply") or "").strip()
@@ -485,6 +585,11 @@ async def run_turn(
 
     raw_actions = data.get("actions")
     actions = raw_actions if isinstance(raw_actions, list) else []
+    if is_acknowledgement(cleaned):
+        # 用户只回了"嗯"，模型却要动手 —— 这多半是顺着历史在复读，拦掉
+        if actions:
+            logger.warning("assistant dropped actions on acknowledgement user_id=%s", user_id)
+        actions = []
     results, _rejected = await execute_actions(session, user_id, actions)
 
     assistant_message = ChatMessage(

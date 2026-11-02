@@ -15,7 +15,7 @@
 
 import { computed, nextTick, onMounted, ref } from 'vue'
 
-import { api } from '@/api/client'
+import { ApiError, api } from '@/api/client'
 import type { AssistantAction, AssistantMessage, AssistantTurn } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 import { describeAction, failureText } from '@/lib/assistantDisplay'
@@ -29,6 +29,8 @@ interface Bubble {
   status: 'ok' | 'sending' | 'failed'
   imageUrl?: string
   file?: File | null
+  /** 后端已落库的用户消息 id。失败重试时带回去，避免重复插一条同样的消息 */
+  serverId?: number
 }
 
 const messages = ref<Bubble[]>([])
@@ -109,10 +111,13 @@ async function deliver(bubble: Bubble) {
   const body = new FormData()
   if (bubble.content) body.append('text', bubble.content)
   if (bubble.file) body.append('image', bubble.file)
+  // 重试：上一次那句话已经落库了，让后端复用它，别再存一条
+  if (bubble.serverId) body.append('reuse_message_id', String(bubble.serverId))
 
   try {
     const turn = await api.post<AssistantTurn>('/conversation/messages', body)
     bubble.status = 'ok'
+    bubble.serverId = turn.user_message_id ?? bubble.serverId
     messages.value.push({
       key: turn.assistant_message_id ? `srv-${turn.assistant_message_id}` : nextKey(),
       role: 'assistant',
@@ -122,11 +127,16 @@ async function deliver(bubble: Bubble) {
     })
   } catch (err) {
     bubble.status = 'failed'
+    // 后端把已落库的用户消息 id 放在 error.detail 里，重试时复用它
+    if (err instanceof ApiError) {
+      const persisted = err.detail?.user_message_id
+      if (typeof persisted === 'number') bubble.serverId = persisted
+    }
     const detail = err instanceof Error ? err.message : '没发出去'
     messages.value.push({
       key: nextKey(),
       role: 'assistant',
-      content: `这条没发出去（${detail}）。点上面的「重试」再发一次。`,
+      content: `刚才没接上（${detail}）。点上面的「重试」我再答一次——你的话已经存下了，不会丢。`,
       actions: [],
       status: 'failed',
     })

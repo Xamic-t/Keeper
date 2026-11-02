@@ -72,7 +72,29 @@ def _image_part(image: bytes) -> dict[str, Any]:
 
 
 async def _post(provider: Provider, payload: dict[str, Any]) -> str:
-    """发一次请求，返回 message.content 原文。"""
+    """发一次请求，返回 message.content 原文。
+
+    空白内容会在**同一个通道上**再要一次（最多 2 次）：实测 json_object 模式偶发
+    只回空白，这不是通道坏了，是这一次生成废了。同一通道重来一次比切备通道更划算。
+    """
+    last_blank = False
+    for _attempt in (1, 2):
+        content = await _post_once(provider, payload)
+        if content is not None:
+            return content
+        last_blank = True
+    if last_blank:
+        raise AppError(
+            ErrorCode.AI_UPSTREAM_ERROR,
+            "模型返回了空内容",
+            status_code=502,
+            detail={"provider": provider.name},
+        )
+    raise AppError(ErrorCode.AI_UPSTREAM_ERROR, "模型返回格式异常", status_code=502)
+
+
+async def _post_once(provider: Provider, payload: dict[str, Any]) -> str | None:
+    """发一次请求。内容空白时返回 None，让上层决定重试。"""
     headers = {
         "Authorization": f"Bearer {provider.api_key}",
         "Content-Type": "application/json",
@@ -98,7 +120,7 @@ async def _post(provider: Provider, payload: dict[str, Any]) -> str:
 
     data = response.json()
     try:
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise AppError(
             ErrorCode.AI_UPSTREAM_ERROR,
@@ -106,6 +128,12 @@ async def _post(provider: Provider, payload: dict[str, Any]) -> str:
             status_code=502,
             detail={"provider": provider.name},
         ) from exc
+
+    # 有些通道（实测 deepseek 的 json_object 模式）偶尔返回 None 或一整段空白。
+    # 交给 _post 决定重试次数，不把空白当答案往解析器里塞。
+    if not isinstance(content, str) or not content.strip():
+        return None
+    return content
 
 
 def _strip_fence(raw: str) -> str:
@@ -120,20 +148,98 @@ def _strip_fence(raw: str) -> str:
     return text
 
 
+def _first_json_object(text: str) -> str | None:
+    """从一段文字里**定位**第一个完整的 JSON 对象。
+
+    只做括号配对（含字符串与转义），不补引号、不改逗号、不猜字段——
+    语法错了照样解析失败。所以这不是"修格式"，是"把 JSON 从话里挑出来"。
+
+    实测模型常这样回：
+        "好的，我帮你建。\n{\"reply\": \"...\", \"actions\": [...]}\n要不要再建一个？"
+    前面一句客气话、后面一句追问，JSON 在中间。直接 json.loads 整段必失败。
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
 def parse_json(raw: str) -> dict[str, Any]:
-    """解析模型输出。不合法就抛 502，交给上层标 failed。"""
-    try:
-        parsed = json.loads(_strip_fence(raw))
-    except json.JSONDecodeError as exc:
-        logger.warning("model returned non-json output")
-        raise AppError(
-            ErrorCode.AI_UPSTREAM_ERROR,
-            "模型没有返回合法 JSON",
-            status_code=502,
-        ) from exc
-    if not isinstance(parsed, dict):
-        raise AppError(ErrorCode.AI_UPSTREAM_ERROR, "模型返回的不是对象", status_code=502)
-    return parsed
+    """解析模型输出。解析不出就抛 502，交给上层决定重试还是标 failed。
+
+    三级尝试，逐级放宽但都只做"剥壳/定位"，不做语法修复：
+      ① 原样解析
+      ② 去掉 ``` 围栏再解析
+      ③ 从文字里挑出第一个完整的 {...} 再解析
+    """
+    candidates: list[str] = []
+    stripped = raw.strip()
+    if stripped:
+        candidates.append(stripped)
+    unfenced = _strip_fence(raw)
+    if unfenced and unfenced != stripped:
+        candidates.append(unfenced)
+    located = _first_json_object(unfenced or stripped)
+    if located:
+        candidates.append(located)
+
+    last_error: json.JSONDecodeError | None = None
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+        if not isinstance(parsed, dict):
+            raise AppError(ErrorCode.AI_UPSTREAM_ERROR, "模型返回的不是对象", status_code=502)
+        return parsed
+
+    # 只记长度和首字符类型，不记内容：对话里可能带用户隐私
+    logger.warning(
+        "model returned non-json output len=%s startswith_brace=%s",
+        len(raw),
+        raw.strip().startswith("{"),
+    )
+    raise AppError(
+        ErrorCode.AI_UPSTREAM_ERROR,
+        "模型没有返回合法 JSON",
+        status_code=502,
+    ) from last_error
+
+
+# 对话专用：在最后一轮补一句"只输出 JSON"的硬要求。
+# 为什么不在 system 里写就够了：实测 system 里的格式要求会被多轮历史稀释，
+# 模型 5/5 直接给散文；补在末尾后 5/5 给 JSON。见 2026-11-03 的探针对比。
+JSON_NUDGE = {
+    "role": "user",
+    "content": (
+        "（只输出一个 JSON 对象，形如 "
+        '{"reply": "给用户看的话", "actions": []}'
+        "。不要写任何 JSON 之外的字，不要加 ``` 围栏。）"
+    ),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,11 +261,18 @@ class VisionClient:
         *,
         json_mode: bool,
         temperature: float = 0.1,
+        thinking: bool = True,
+        structured: bool = True,
     ) -> tuple[Provider, str]:
         """主备 + 重试的唯一实现。返回 (命中的通道, 原文)。
 
         收的是完整的 messages 数组（不是单条 content）：抽取是"一个 user 消息"，
         对话是多轮消息。两者共用同一套主备/重试，避免两套失败语义。
+
+        `structured`：是否带 `response_format=json_object`。
+        **对话必须关掉**（2026-11-03 实测）：只要 messages 里有多轮历史，
+        deepseek-flash 带这个参数就 5/5 返回空 content（finish_reason 仍是 stop），
+        去掉后 0/5。抽取是单轮 messages，不受影响，继续带着。
         """
         providers = _providers()
         if not providers:
@@ -176,8 +289,14 @@ class VisionClient:
                 "messages": messages,
                 "temperature": temperature,
             }
-            if json_mode:
+            if json_mode and structured:
                 payload["response_format"] = {"type": "json_object"}
+            if not thinking:
+                # 实测（2026-11-03）：deepseek-flash 是推理模型，json_object 模式下
+                # 约 1/4 的请求会"思考完了不给正文"——content 为空、finish_reason 却是 stop，
+                # 上层只能看到"空内容"。关掉思考后正文稳定返回，也更快更省 token。
+                # 抽取那条链路仍然开着思考（要的是判断质量，不是速度）。
+                payload["thinking"] = {"type": "disabled"}
 
             for attempt in (1, 2):
                 try:
@@ -253,21 +372,33 @@ class VisionClient:
         temperature 比抽取高（0.6 vs 0.1）：抽取要稳定复现，聊天要像人说话。
         但仍然是"低随机"——这个助理的职责是帮人记事，不是写文案。
 
-        **为什么这里单独加一次"JSON 不合格就重来"**：
-        抽取那条链路输出不是 JSON 就直接标 failed（宁可这条材料失败，也不猜格式）；
-        但对话里用户正等着回话，一次偶发的空输出/多一句客气话不该变成报错。
-        所以只重发一次，仍然**不做任何格式修复**——两次都不合格就老实报 502，
-        前端给"重试"，把选择权交回用户。
+        **可靠性三级**（实测 deepseek 的 json_object 模式会偶发只回空白）：
+          ① 正常要 JSON，解析失败就再要一次（_dispatch 内部还会按通道重试）
+          ② 两次都不是 JSON → 再要一次**纯文本**，只当 reply，一条动作都不执行
+          ③ 连纯文本都拿不到 → 502，前端给"重试"
+
+        第 ② 步是关键取舍：**宁可这次不建待办，也要让用户看到一句话**。
+        因为"助理没听懂/没动手"用户能自己补一句；而"红色报错"只会让人以为系统坏了。
         """
+        if not json_mode:
+            provider, raw = await self._dispatch(
+                messages, json_mode=False, temperature=temperature, thinking=False, structured=False
+            )
+            return ModelReply(
+                parsed={"text": raw}, raw=raw, provider=provider.name, model=provider.model
+            )
+
+        # 末尾补一句硬要求：光靠 system prompt 里的格式说明，模型会跑偏成散文
+        constrained = [*messages, JSON_NUDGE]
         last_error: AppError | None = None
         for attempt in (1, 2):
             provider, raw = await self._dispatch(
-                messages, json_mode=json_mode, temperature=temperature
+                constrained,
+                json_mode=True,
+                temperature=temperature,
+                thinking=False,
+                structured=False,
             )
-            if not json_mode:
-                return ModelReply(
-                    parsed={"text": raw}, raw=raw, provider=provider.name, model=provider.model
-                )
             try:
                 parsed = parse_json(raw)
             except AppError as exc:
@@ -277,8 +408,39 @@ class VisionClient:
                 continue
             return ModelReply(parsed=parsed, raw=raw, provider=provider.name, model=provider.model)
 
-        raise last_error or AppError(
-            ErrorCode.AI_UPSTREAM_ERROR, "模型没有给出回复", status_code=502
+        logger.warning("assistant degraded to plain text reply")
+        try:
+            provider, raw = await self._dispatch(
+                [
+                    *messages,
+                    {
+                        "role": "user",
+                        "content": (
+                            "（系统提示：上一条不用 JSON 了，直接用中文回一句话给用户，"
+                            "不要建任何东西。）"
+                        ),
+                    },
+                ],
+                json_mode=False,
+                temperature=temperature,
+                thinking=False,
+                structured=False,
+            )
+        except AppError:
+            raise last_error or AppError(
+                ErrorCode.AI_UPSTREAM_ERROR, "模型没有给出回复", status_code=502
+            ) from last_error
+
+        text = raw.strip()
+        if not text:
+            raise last_error or AppError(
+                ErrorCode.AI_UPSTREAM_ERROR, "模型没有给出回复", status_code=502
+            )
+        return ModelReply(
+            parsed={"reply": text, "actions": [], "degraded": True},
+            raw=raw,
+            provider=provider.name,
+            model=provider.model,
         )
 
 

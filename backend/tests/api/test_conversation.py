@@ -408,3 +408,120 @@ async def test_history_limit_is_bounded(
     await login(client, single_user)
     response = await client.get("/api/conversation/messages", params={"limit": 9999})
     assert response.status_code == 400
+
+
+async def test_failure_detail_carries_user_message_id(
+    client: httpx.AsyncClient, single_user: Account, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """模型失败时要把已落库的那条消息 id 带出来，前端才能"重试不重复"。"""
+    from app.core.errors import AppError, ErrorCode
+    from app.services.vision import vision as vision_client
+
+    async def _fail(messages: list[dict], **kwargs: object):
+        raise AppError(ErrorCode.AI_UPSTREAM_ERROR, "upstream down", status_code=502)
+
+    monkeypatch.setattr(vision_client, "converse", _fail)
+    csrf = await login(client, single_user)
+
+    response = await client.post(
+        "/api/conversation/messages", data={"text": "在吗"}, headers=csrf_headers(csrf)
+    )
+
+    assert response.status_code == 502
+    detail = response.json()["error"]["detail"]
+    assert isinstance(detail.get("user_message_id"), int)
+
+
+async def test_retry_reuses_user_message(
+    client: httpx.AsyncClient, single_user: Account, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """重试带 reuse_message_id：不新增用户消息，只补一条助手回复。"""
+    from app.core.errors import AppError, ErrorCode
+    from app.services.vision import vision as vision_client
+
+    state = {"fail": True}
+
+    async def _flaky(messages: list[dict], **kwargs: object):
+        if state["fail"]:
+            raise AppError(ErrorCode.AI_UPSTREAM_ERROR, "upstream down", status_code=502)
+        return _reply({"reply": "这次接上了", "actions": []})
+
+    monkeypatch.setattr(vision_client, "converse", _flaky)
+    csrf = await login(client, single_user)
+
+    first = await client.post(
+        "/api/conversation/messages", data={"text": "王姐喜欢什么"}, headers=csrf_headers(csrf)
+    )
+    assert first.status_code == 502
+    message_id = first.json()["error"]["detail"]["user_message_id"]
+
+    state["fail"] = False
+    retried = await client.post(
+        "/api/conversation/messages",
+        data={"text": "王姐喜欢什么", "reuse_message_id": str(message_id)},
+        headers=csrf_headers(csrf),
+    )
+
+    assert retried.status_code == 200
+    assert retried.json()["data"]["reply"] == "这次接上了"
+
+    history = (await client.get("/api/conversation/messages")).json()["data"]
+    assert [item["role"] for item in history] == ["user", "assistant"], "不能出现两条一样的用户消息"
+    assert history[0]["id"] == message_id
+
+
+async def test_retry_rejects_unknown_message(
+    client: httpx.AsyncClient, single_user: Account, fake_model: dict
+) -> None:
+    csrf = await login(client, single_user)
+    response = await client.post(
+        "/api/conversation/messages",
+        data={"text": "在吗", "reuse_message_id": "999999"},
+        headers=csrf_headers(csrf),
+    )
+    assert response.status_code == 404
+
+
+async def test_acknowledgement_does_not_trigger_actions(
+    client: httpx.AsyncClient, single_user: Account, fake_model: dict
+) -> None:
+    """用户只回"嗯"，模型却想建待办 → 机器侧拦掉，只回话。
+
+    实测过：连续几轮之后再发"嗯"，模型会顺着历史把上一轮的建待办再执行一遍。
+    提示词已经写了"只执行本轮明确要求"，但这种事不能只靠提示词。
+    """
+    fake_model["payload"] = {
+        "reply": "嗯，我在。",
+        "actions": [{"type": "create_todo", "title": "重复建的待办"}],
+    }
+    csrf = await login(client, single_user)
+
+    response = await client.post(
+        "/api/conversation/messages", data={"text": "嗯"}, headers=csrf_headers(csrf)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["actions"] == []
+    async with rls_session(single_user.id) as session:
+        assert (await session.execute(select(Todo))).scalars().all() == []
+
+
+async def test_normal_instruction_still_executes(
+    client: httpx.AsyncClient, single_user: Account, fake_model: dict
+) -> None:
+    """对照组：明确指令照常执行，别把正常请求也拦了。"""
+    fake_model["payload"] = {
+        "reply": "建好了。",
+        "actions": [{"type": "create_todo", "title": "给王姐寄样品"}],
+    }
+    csrf = await login(client, single_user)
+
+    response = await client.post(
+        "/api/conversation/messages",
+        data={"text": "帮我建个待办：给王姐寄样品"},
+        headers=csrf_headers(csrf),
+    )
+
+    assert len(response.json()["data"]["actions"]) == 1
+    async with rls_session(single_user.id) as session:
+        assert len((await session.execute(select(Todo))).scalars().all()) == 1

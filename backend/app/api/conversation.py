@@ -23,6 +23,14 @@ from app.services import ingest as ingest_service
 router = APIRouter(prefix="/conversation", tags=["conversation"])
 
 
+async def _read_upload(image: UploadFile | None) -> ingest_service.UploadItem | None:
+    """读图 + 走投喂那套大小/格式校验。没传图返回 None。"""
+    if image is None:
+        return None
+    limit = settings.max_upload_mb * 1024 * 1024
+    return ingest_service.build_upload_item(image.filename, await image.read(limit + 1))
+
+
 class MessageOut(BaseModel):
     id: int | None
     role: str
@@ -77,14 +85,18 @@ async def send_message(
     session: Annotated[AsyncSession, Depends(get_session)],
     text: Annotated[str, Form(description="用户说的话，有图时可空")] = "",
     image: Annotated[UploadFile | None, File(description="jpg / png / webp，≤8MB")] = None,
+    reuse_message_id: Annotated[int | None, Form(description="重试时复用这条消息")] = None,
 ) -> dict[str, Any]:
-    """同步等模型回。模型挂了返回 502，用户消息已落库，前端可直接重发。"""
-    upload = None
-    if image is not None:
-        limit = settings.max_upload_mb * 1024 * 1024
-        upload = ingest_service.build_upload_item(image.filename, await image.read(limit + 1))
+    """同步等模型回。失败时 error.detail.user_message_id 可用于原消息重试。"""
+    upload = await _read_upload(image)
 
-    result = await conversation_service.run_turn(session, user.id, text=text, image=upload)
+    result = await conversation_service.run_turn(
+        session,
+        user.id,
+        text=text,
+        image=upload,
+        reuse_user_message_id=reuse_message_id,
+    )
     return ok(
         TurnOut(
             reply=result.reply,
