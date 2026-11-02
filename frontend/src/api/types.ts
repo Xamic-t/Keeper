@@ -192,6 +192,37 @@ export interface ChatFactRef {
   evidence: string | null
 }
 
+/**
+ * 助理对话（2026-11-03 新增）。
+ *
+ * 和 ChatReply 的区别：ChatReply 是投喂对话框的返回（规则路由，没有动作），
+ * 这里是主界面「助理」页的多轮对话，带已执行的动作。
+ */
+export interface AssistantAction {
+  type: 'create_todo' | 'create_event' | 'add_fact' | string
+  ok: boolean
+  summary: string
+  ref_id: number | null
+  reason: string | null
+}
+
+export interface AssistantMessage {
+  id: number | null
+  role: 'user' | 'assistant'
+  content: string
+  actions: AssistantAction[]
+  image_raw_input_id: number | null
+  created_at: string
+}
+
+export interface AssistantTurn {
+  reply: string
+  actions: AssistantAction[]
+  user_message_id: number | null
+  assistant_message_id: number | null
+  raw_input_id: number | null
+}
+
 export interface ChatReply {
   reply: string
   /** feed = 投喂回执，query = 检索回答，clarify = 反问是谁 */

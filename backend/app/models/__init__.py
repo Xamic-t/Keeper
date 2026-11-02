@@ -3,6 +3,7 @@
 新增表必须在这里导出，否则 autogenerate 会漏掉。
 """
 
+from app.models.chat import ChatMessage
 from app.models.event import Event, Reminder
 from app.models.fact import Fact, Tag
 from app.models.input import ChatSegment, RawInput
@@ -15,6 +16,7 @@ from app.models.todo import Todo
 from app.models.user import User
 
 __all__ = [
+    "ChatMessage",
     "ChatSegment",
     "Event",
     "ExtractionLog",

@@ -8,18 +8,17 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
+// 助理是**一级菜单**（2026-11-03 用户明确要求）：桌面和手机都要有。
+// 之前它只在桌面侧栏出现、手机上要从设置绕进去，等于没有。
 const navItems = [
   { name: 'today', label: '今日', icon: '◎' },
   { name: 'ingest', label: '投喂', icon: '↥' },
+  { name: 'assistant', label: '助理', icon: '✦' },
   { name: 'persons', label: '人', icon: '☺' },
   { name: 'confirm', label: '确认', icon: '✓' },
   { name: 'calendar', label: '日历', icon: '▦' },
   { name: 'todos', label: '待办', icon: '☑' },
 ]
-
-// 助理只在桌面侧栏出现：手机底部 tab 已经 6 个，再加就挤成条码了，
-// 手机用户从「设置」页的卡片进
-const desktopOnly = [{ name: 'assistant', label: '助理', icon: '✦' }]
 const adminItems = computed(() =>
   auth.user?.role === 'owner' ? [{ name: 'admin', label: '账号', icon: '⚙' }] : [],
 )
@@ -44,17 +43,6 @@ async function signOut() {
       <nav class="mt-8 flex flex-col gap-1">
         <RouterLink
           v-for="item in navItems"
-          :key="item.name"
-          :to="{ name: item.name }"
-          class="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-ink-soft transition hover:bg-surface"
-          :class="active === item.name ? 'bg-surface font-medium text-ink shadow-sm' : ''"
-        >
-          <span class="w-4 text-center">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-        </RouterLink>
-
-        <RouterLink
-          v-for="item in desktopOnly"
           :key="item.name"
           :to="{ name: item.name }"
           class="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-ink-soft transition hover:bg-surface"

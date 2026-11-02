@@ -151,11 +151,16 @@ class VisionClient:
 
     async def _dispatch(
         self,
-        content: list[dict[str, Any]],
+        messages: list[dict[str, Any]],
         *,
         json_mode: bool,
+        temperature: float = 0.1,
     ) -> tuple[Provider, str]:
-        """主备 + 重试的唯一实现。返回 (命中的通道, 原文)。"""
+        """主备 + 重试的唯一实现。返回 (命中的通道, 原文)。
+
+        收的是完整的 messages 数组（不是单条 content）：抽取是"一个 user 消息"，
+        对话是多轮消息。两者共用同一套主备/重试，避免两套失败语义。
+        """
         providers = _providers()
         if not providers:
             raise AppError(
@@ -168,8 +173,8 @@ class VisionClient:
         for provider in providers:
             payload: dict[str, Any] = {
                 "model": provider.model,
-                "messages": [{"role": "user", "content": content}],
-                "temperature": 0.1,
+                "messages": messages,
+                "temperature": temperature,
             }
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
@@ -216,7 +221,9 @@ class VisionClient:
         if image:
             content.append(_image_part(image))
 
-        provider, raw = await self._dispatch(content, json_mode=schema is not None)
+        provider, raw = await self._dispatch(
+            [{"role": "user", "content": content}], json_mode=schema is not None
+        )
         return ModelReply(
             parsed=parse_json(raw), raw=raw, provider=provider.name, model=provider.model
         )
@@ -227,9 +234,51 @@ class VisionClient:
         if text:
             content.append({"type": "text", "text": text})
 
-        provider, raw = await self._dispatch(content, json_mode=False)
+        provider, raw = await self._dispatch(
+            [{"role": "user", "content": content}], json_mode=False
+        )
         return ModelReply(
             parsed={"text": raw}, raw=raw, provider=provider.name, model=provider.model
+        )
+
+    async def converse(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        json_mode: bool = True,
+        temperature: float = 0.6,
+    ) -> ModelReply:
+        """多轮对话。助理用它：system + 历史 + 本轮，走同一套主备通道。
+
+        temperature 比抽取高（0.6 vs 0.1）：抽取要稳定复现，聊天要像人说话。
+        但仍然是"低随机"——这个助理的职责是帮人记事，不是写文案。
+
+        **为什么这里单独加一次"JSON 不合格就重来"**：
+        抽取那条链路输出不是 JSON 就直接标 failed（宁可这条材料失败，也不猜格式）；
+        但对话里用户正等着回话，一次偶发的空输出/多一句客气话不该变成报错。
+        所以只重发一次，仍然**不做任何格式修复**——两次都不合格就老实报 502，
+        前端给"重试"，把选择权交回用户。
+        """
+        last_error: AppError | None = None
+        for attempt in (1, 2):
+            provider, raw = await self._dispatch(
+                messages, json_mode=json_mode, temperature=temperature
+            )
+            if not json_mode:
+                return ModelReply(
+                    parsed={"text": raw}, raw=raw, provider=provider.name, model=provider.model
+                )
+            try:
+                parsed = parse_json(raw)
+            except AppError as exc:
+                # 只记长度，不记内容：对话里可能带用户隐私
+                logger.warning("assistant json invalid attempt=%s len=%s", attempt, len(raw))
+                last_error = exc
+                continue
+            return ModelReply(parsed=parsed, raw=raw, provider=provider.name, model=provider.model)
+
+        raise last_error or AppError(
+            ErrorCode.AI_UPSTREAM_ERROR, "模型没有给出回复", status_code=502
         )
 
 

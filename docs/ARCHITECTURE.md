@@ -81,7 +81,7 @@
 | **导出** | 全量 ZIP + 单人 JSON | V1 |
 | **管理** | owner 账号列表 / 建号 / 禁用 / 重置密码 | V1（API + 页面） |
 | **离线回放** | 预录 fixture，断网演示完整流程 | V1 |
-| **助理** | 对话式投喂 + 查询（Harness 侧车） | V1 基础 / V2 完整 |
+| **助理** | 主界面一级菜单里的原生对话：发文字/图片、问问题、让模型建待办与事件 | V1 |
 | **关系温度** | 五维打分驱动活跃窗口 | V2 |
 | **需求感知** | 温度 × 场景的 2×2 判断 | V2 |
 | **对话式问答** | 混合检索路由 | V2 |
@@ -132,11 +132,11 @@ D5-A 补最小管理 UI。实现记录见 `docs/27-决策落地记录.md`。
                      │
         企业微信 webhook → PushPlus（降级）
 
-可选侧车：Harness（Node 容器，dsh Web UI + 5 个只读 API），
-         独立进程，挂了不影响主流程（见 19.7）。
+可选侧车：Harness（Node 容器，5 个只读 API），**默认不启、前端不依赖**
+         ——2026-11-03 起助理改为主服务自研，侧车只留给 agent 实验（见 19.7.8）。
 ```
 
-**一句话**：一个 Python API + 一个定时任务进程 + 一个 Vue 静态包 + 一个 Postgres 实例；Harness 是可选侧车。
+**一句话**：一个 Python API + 一个定时任务进程 + 一个 Vue 静态包 + 一个 Postgres 实例；Harness 是可选侧车，助理不依赖它。
 
 ### 6.1 进程与故障边界（2026-11-02 起）
 
@@ -256,7 +256,7 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 
 | 能力 | 库 | 用在哪 |
 |---|---|---|
-| ORM | SQLModel | 13 张 V1 表的定义与查询（V2 三张未建，见 19.3） |
+| ORM | SQLModel | 14 张 V1 表的定义与查询（2026-11-03 新增 `chat_messages`；V2 三张未建，见 19.3） |
 | 迁移 | Alembic | 建表、改表 |
 | 配置 | pydantic-settings | 读 `.env` |
 | 密码哈希 | argon2-cffi | 登录 |
@@ -648,7 +648,7 @@ scripts/                  # 仓库根：不 import app 的 shell 运维脚本（
 | `app/core/security.py` | 安全原语 | argon2 哈希、cookie 签发、CSRF token | 登录流程编排（属 service） | 无（`argon2-cffi` / `itsdangerous`） | `security.py`（98 行） | 【项目】 |
 | `app/api/router.py` | 路由汇总 | 每个模块一行 `include_router` | 任何路由函数本体 | `APIRouter(prefix="/api")` | `router.py`（45 行） | 【框架】 |
 | `app/api/*.py` | 路由层 | 一个业务模块一个文件：取参数、调 service、返回；**该模块的请求/响应模型** | 数据库查询、业务判断、模型调用、超过 30 行的函数 | `APIRouter`、`response_model`、`Depends` | `api/health.py`（35 行，规模参考） | 【框架】 |
-| `app/models/` | 表定义 | SQLModel 类：字段、约束、关系、`__tablename__` | 任何 `select()` / `session.exec()`、业务方法 | SQLModel / SQLAlchemy 2.0 | 13 张 V1 表（见 `models/__init__.py`） | 【项目】 |
+| `app/models/` | 表定义 | SQLModel 类：字段、约束、关系、`__tablename__` | 任何 `select()` / `session.exec()`、业务方法 | SQLModel / SQLAlchemy 2.0 | 14 张 V1 表（见 `models/__init__.py`） | 【项目】 |
 | `app/services/` | 业务逻辑 | 一条业务主线的完整实现，可脱离 HTTP 单测 | `from fastapi import Request`、`JSONResponse` | 无（纯 Python，方便 pytest） | `services/person.py`、`services/reminder.py` | 【项目】 |
 | `app/jobs/` | 定时任务 | 任务入口函数，内部调 service | 业务逻辑（应下沉到 service） | `APScheduler` | `jobs/daily.py`（`--serve` 常驻 + 单次） | 【项目】 |
 | `alembic/versions/` | 迁移脚本 | 每个版本一个文件，顶部写清对应文档与回滚影响 | 手工改库留下的临时 SQL | Alembic | `alembic/versions/0001–0006` | 【工具】 |
@@ -1088,7 +1088,7 @@ async def create_user(..., _: User = Depends(require_owner)):
 | `temperature_snapshots` 表 | **未建** | 推迟到 V2 | 同上 |
 | `agent_runs` 表 | **未建** | 推迟到 V2 | 同上 |
 
-**结论**：V1 实际 **13 张表**（11 个业务对象 + `extraction_logs` + `notification_channels`），
+**结论**：V1 实际 **14 张表**（12 个业务对象 + `extraction_logs` + `notification_channels`；2026-11-03 增 `chat_messages`），
 不是早期文档写的 15 张。字段清单以 `docs/06` 和 `backend/app/models/` 为准。
 
 **理由**：这三张表 V1 一行数据都不会写；建了只会让迁移、RLS、备份多三份维护成本。
@@ -1311,7 +1311,7 @@ Python 从 Postgres 读
 | 子 Agent 编排 | ❌ | 一个助理够了，多 Agent 只会更难调试 |
 | 沙箱 / 文件系统 | ❌ | 助理不需要读写文件，开了就是风险面 |
 | 代码执行 | ❌ | 不需要，且危险 |
-| 自带 Web UI | ✅（V1 嵌入） | `/assistant` iframe 嵌 dsh Web UI；token 地址只存当前标签页 `sessionStorage`。2026-11-02 D2-A 决策：V1 不自研助理前端，V2 再评估 |
+| 自带 Web UI | ❌ **V1 不用** | 2026-11-03 用户否决 iframe 方案（要另起服务、粘 token、手机进不去）。助理改为主界面自研对话，见 19.7.8 |
 | 四种预设模式 | 选 **minimal** | 工具少、行为可预测 |
 
 #### 19.7.7 架构影响清单
@@ -1347,7 +1347,35 @@ Python 从 Postgres 读
 > **Harness 接在侧面，不接在中间。**
 > **它能记住"聊过什么"，但不能记住"业务是什么"——后者永远只有 Postgres 说了算。**
 
-> 反过来：**如果哪天想让助理能"改数据"（比如"帮我把王姐的阶段改成 core"），那就必须先设计一件事：Harness 的写操作要不要进确认队列。** 在没有答案之前，助理只读。
+> 反过来：**如果哪天想让助理能"改数据"，必须先设计一件事：写操作要不要进确认队列。**
+> **这个问题的答案已经有了，见 19.7.10**：写操作走白名单 + 全部落"待确认"，不进档案。
+
+#### 19.7.10 2026-11-03 决策：助理自研前端，Harness 降为可选
+
+**用户否决了 iframe 方案**，原话要点：不要另开窗口、不要单独启动、不要藏在设置里。
+实测痛点：侧车没起是白屏、token 每次重启都变要手粘、手机端从设置进不去。
+
+| 项 | 2026-11-02（D2-A） | **2026-11-03（D6-A，现行）** |
+|---|---|---|
+| 助理入口 | `/assistant` iframe 嵌 dsh Web UI，桌面侧栏 + 设置页 | **主界面一级菜单**（桌面侧栏 + 手机底部 tab） |
+| 前端实现 | 不自研 | **自研对话 UI**：气泡、打字中、重试、附图、动作卡片、历史 |
+| 对话能力 | Harness 提供 | 主服务 `services/conversation.py`，复用 `VisionClient` 主备通道 |
+| 写操作 | 无（只读） | **白名单 3 种**：`create_todo` / `create_event` / `add_fact`（只落 pending） |
+| Harness 侧车 | 必需（否则助理不可用） | **可选、默认不启**，前端零依赖；保留给将来的 agent 实验 |
+| 会话存储 | Harness 的存储 | **Postgres 新表 `chat_messages`**（RLS 同其它业务表） |
+
+**为什么自研而不是继续嵌**：助理要能"建待办"，这一步必须落在主服务里——
+它要过 RLS、要过服务层校验、要能被审计。sidecar 做不到这点还必须开写接口，
+那才是真的破坏 19.7.4 的三条前提。**自研前端 + 主服务执行动作，反而让边界更干净。**
+
+**写操作的安全边界（回答 19.7.9 那个问题）**：
+
+| 规则 | 实现 |
+|---|---|
+| 破坏性动作一律不在白名单 | 删人、改别人数据、批量导入，模型说得出也做不了 |
+| 一轮最多 3 个动作 | `MAX_ACTIONS_PER_TURN`，防"一口气建 20 条待办" |
+| 记事实只进确认队列 | `add_fact` 落 `status=pending`，用户在确认页点过才算数 |
+| 执行结果进对话气泡 | 「✅ 已创建待办 · 查看」，用户当场能看见、能去删 |
 
 ---
 
@@ -1407,6 +1435,7 @@ Python 从 Postgres 读
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
+| 2026-11-03 | v2.8 | 助理口径变更（D6-A）：① §4 助理从「Harness 侧车 / V1 基础」改为「主界面自研对话 / V1」；② 新增 19.7.10（自研前端 + 写操作白名单，Harness 降为可选）；③ §6 拓扑注明侧车默认不启、前端零依赖；④ 表数 13 → 14（新增 `chat_messages`） |
 | 2026-11-03 | v2.7 | ① 11.1/11.3 补仓库根 `scripts/` 目录与「两个 scripts 的分工」——N 批次新增 `preflight_deploy.sh`，属事实性目录说明，不改任何要求；② 无其它口径变更（RLS 全表审计通过，未改设计） |
 | 2026-11-02 | v2.6 | D1-A/D2-A/D3-A/D4-A/D5-A 决策落地：PWA 保留为 V1；Harness UI 正式采用 iframe（V1）；API+Scheduler 双进程转正；新增 8.12 离线回放 fixture 模式；管理 UI 纳入 V1；7.6.1 补 vite-plugin-pwa |
 | 2026-11-02 | v2.5 | 架构符合性审计：恢复 v2.4 擅自删除的 PWA 要求与 Harness "自带 Web UI ❌" 原约束（代码违背处列 `docs/26` 待决策）；给 Scheduler 双进程变更加"待追认"标记；新增 8.11 测试分层与架构约束测试说明 |

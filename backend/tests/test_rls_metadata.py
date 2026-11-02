@@ -116,8 +116,8 @@ def test_no_unclassified_table_in_database(rls_state: dict[str, TableRls]) -> No
 
 
 def test_business_table_count_matches_architecture() -> None:
-    """ARCHITECTURE / docs/06 的 13 张表 = 12 张业务表 + users。"""
-    assert len(_business_tables()) == 12
+    """ARCHITECTURE / docs/06 的 14 张表 = 13 张业务表 + users（2026-11-03 增 chat_messages）。"""
+    assert len(_business_tables()) == 13
     assert set(SQLModel.metadata.tables) == set(_business_tables()) | set(RLS_EXEMPT)
 
 

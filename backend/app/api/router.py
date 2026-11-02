@@ -8,6 +8,7 @@ from app.api import (
     auth,
     chat,
     confirmations,
+    conversation,
     events,
     export,
     facts,
@@ -31,6 +32,7 @@ api_router.include_router(auth.router)
 api_router.include_router(persons.router)
 api_router.include_router(ingest.router)
 api_router.include_router(chat.router)
+api_router.include_router(conversation.router)
 # 助理只读接口：给 Harness 侧车用，主流程不依赖
 api_router.include_router(assistant.router)
 api_router.include_router(confirmations.router)

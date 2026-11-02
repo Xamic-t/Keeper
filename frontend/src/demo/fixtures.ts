@@ -7,6 +7,8 @@
 
 import type {
   AdminUserOut,
+  AssistantMessage,
+  AssistantTurn,
   CalendarItem,
   ChatReply,
   ConfirmationGroup,
@@ -378,6 +380,42 @@ const CHAT: ChatReply = {
   pending_count: 0,
 }
 
+// ── 助理对话（2026-11-03 新增，离线演示要能演"说一句话就建待办"）──
+const CONVERSATION: AssistantMessage[] = [
+  {
+    id: 1,
+    role: 'user',
+    content: '11 月 4 号王姐生日，帮我建个待办',
+    actions: [],
+    image_raw_input_id: null,
+    created_at: isoAt(-1, 20),
+  },
+  {
+    id: 2,
+    role: 'assistant',
+    content: '好，11-04 给王姐建了待办：准备生日礼物。要不要顺手把生日事件也记进日历？',
+    actions: [
+      {
+        type: 'create_todo',
+        ok: true,
+        summary: '已创建待办：给王姐准备生日礼物（王姐），2026-11-04',
+        ref_id: 901,
+        reason: null,
+      },
+    ],
+    image_raw_input_id: null,
+    created_at: isoAt(-1, 20),
+  },
+]
+
+const ASSISTANT_TURN: AssistantTurn = {
+  reply: '她喜欢白茶，太甜的不喝（依据：最近在喝白茶）。生日礼物可以按这个挑。',
+  actions: [],
+  user_message_id: null,
+  assistant_message_id: null,
+  raw_input_id: null,
+}
+
 /** 返回 undefined 表示这个路径没写 fixture，让调用方走真实请求。 */
 export function demoEnvelope(
   path: string,
@@ -412,6 +450,9 @@ export function demoEnvelope(
   if (clean === '/admin/users') return { data: ADMIN_USERS }
   if (clean === '/chat' && upper === 'POST')
     return { data: CHAT }
+  if (clean === '/conversation/messages' && upper === 'GET') return { data: CONVERSATION }
+  if (clean === '/conversation/messages' && upper === 'POST') return { data: ASSISTANT_TURN }
+  if (clean === '/conversation/messages' && upper === 'DELETE') return { data: { deleted: 2 } }
   if (clean.startsWith('/persons/1') && upper !== 'GET') return { data: DETAIL }
   if (clean.startsWith('/persons') && upper !== 'GET') return { data: { ok: true } }
   if (clean.startsWith('/todos/') && upper !== 'GET') return { data: TODO_LIST[0] }

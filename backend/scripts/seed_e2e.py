@@ -28,6 +28,7 @@ from sqlalchemy import delete, select  # noqa: E402
 from app.core.clock import local_today  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.db import SessionLocal, engine  # noqa: E402
+from app.models.chat import ChatMessage
 from app.models.event import Event, Reminder  # noqa: E402
 from app.models.fact import Fact, Tag  # noqa: E402
 from app.models.input import ChatSegment, RawInput  # noqa: E402
@@ -97,6 +98,7 @@ async def purge_business_data(user_id: int) -> None:
     async with SessionLocal() as session:
         session.info["rls_user_id"] = user_id
         for model in (
+            ChatMessage,
             Todo,
             Reminder,
             Fact,

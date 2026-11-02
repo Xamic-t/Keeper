@@ -20,7 +20,7 @@ const router = createRouter({
     { path: '/todos', name: 'todos', component: () => import('@/views/TodosView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
     { path: '/admin', name: 'admin', component: () => import('@/views/AdminView.vue') },
-    { path: '/assistant', name: 'assistant', component: () => import('@/views/AssistantView.vue') },
+    { path: '/assistant', name: 'assistant', component: () => import('@/views/AssistantChatView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
