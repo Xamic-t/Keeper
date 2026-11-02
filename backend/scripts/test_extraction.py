@@ -2,14 +2,19 @@
 
 用法（在 backend/ 目录下）：
 
-    # 先跑 3 张试试水
-    uv run python scripts/test_extraction.py --dir ~/testdata/screenshots --limit 3
+    # 先跑 3 张试试水（**必须用隔离账号，不要用 owner**）
+    uv run python scripts/test_extraction.py --dir ~/testdata/screenshots \\
+        --limit 3 --user <测试账号>
 
-    # 全量
-    uv run python scripts/test_extraction.py --dir ~/testdata/screenshots
+    # 全量，同时产出机器可读的 JSON 汇总
+    uv run python scripts/test_extraction.py --dir ~/testdata/screenshots \\
+        --user <测试账号> --json-out ~/testdata/抽取结果.json
 
     # 你在核对表里把抽错的条目标成 [x]，然后算准确率
     uv run python scripts/test_extraction.py --score ~/testdata/抽取核对.md
+
+**安全闸门**：这个脚本会真的写事实 / 事件 / 往来。解析到的账号如果是 owner
+且没有显式 `--allow-owner`，脚本会直接退出——不给自己"顺手跑一下"的机会。
 
 为什么直接调 service 而不是打 HTTP：
     不用起后端、不用管 cookie 和 CSRF，而且能一次看到模型原始输出。
@@ -26,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -86,10 +92,14 @@ class Item:
     raw_reply: str = ""
 
 
-async def _find_user(username: str | None) -> int:
+async def _find_user(username: str | None, *, allow_owner: bool = False) -> tuple[int, str, str]:
     """找 user_id。users 表没开 RLS，用无变量的 session 就行。
 
     不传 username 就取 owner 账号——账号名会改，写死名字迟早失效。
+
+    **但绝不默认往 owner 账号里灌数据**：这个脚本会真的写事实、事件、往来，
+    owner 账号就是用户自己的档案。所以解析到 owner 且没显式 --allow-owner 时
+    直接退出，让人自己确认一次。返回 (user_id, username, role)。
     """
     async with SessionLocal() as session:
         if username:
@@ -105,7 +115,17 @@ async def _find_user(username: str | None) -> int:
         if user is None or user.id is None:
             hint = f"找不到账号 {username!r}。" if username else "库里没有 owner 账号。"
             raise SystemExit(f"{hint}\n用 --user 指定登录名，或先在系统里建一个账号。")
-        return user.id
+
+        if user.role == "owner" and not allow_owner:
+            raise SystemExit(
+                f"拒绝执行：解析到的账号 {user.username!r} 是 owner。\n"
+                "这个脚本会真的写事实 / 事件 / 往来，落在 owner 上就是往你自己的档案里灌测试数据。\n\n"
+                "请二选一：\n"
+                "  ① 用隔离账号跑（推荐）：先建一个测试账号，然后 --user <测试账号>\n"
+                "  ② 明确知道自己在做什么：加 --allow-owner\n"
+            )
+
+        return user.id, user.username, user.role
 
 
 async def _person_count(user_id: int) -> int:
@@ -356,6 +376,51 @@ def _write_report(items: list[Item], out_path: Path, person_name: str | None) ->
     print(f"\n核对表已写到：{out_path}")
 
 
+def _write_json(items: list[Item], out_path: Path, user: tuple[int, str, str], model: str) -> None:
+    """输出机器可读的汇总，供后续统计/对比实验直接吃。
+
+    为什么要有：核对表是给人看的（勾选、驳回），这份是给脚本看的。
+    两件事分开，改核对表排版不会打断自动统计。
+    """
+    payload = {
+        "generated_at": datetime.now(UTC).astimezone().isoformat(timespec="seconds"),
+        "user": {"id": user[0], "username": user[1], "role": user[2]},
+        "model": model,
+        "summary": {
+            "images": len(items),
+            "done": sum(1 for item in items if item.status == "done"),
+            "duplicate": sum(1 for item in items if item.duplicate),
+            "failed": sum(1 for item in items if item.status not in {"done", "skipped"}),
+            "skipped": sum(1 for item in items if item.status == "skipped"),
+            "facts": sum(len(item.facts) for item in items),
+            "events": sum(len(item.events) for item in items),
+            "ledgers": sum(len(item.ledgers) for item in items),
+            # 归属没判出来 = 事实不会落库，这是准确率统计里最容易被忽略的失败
+            "unassigned": sum(1 for item in items if item.status == "done" and not item.person_id),
+        },
+        "items": [
+            {
+                "index": item.index,
+                "filename": item.filename,
+                "raw_input_id": item.raw_input_id,
+                "status": item.status,
+                "duplicate": item.duplicate,
+                "error": item.error,
+                "person_id": item.person_id,
+                "person_name": item.person_name,
+                "segments": item.segments,
+                "facts": item.facts,
+                "events": item.events,
+                "ledgers": item.ledgers,
+            }
+            for item in items
+        ],
+    }
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"JSON 汇总已写到：{out_path}")
+
+
 def _score(path: Path) -> int:
     """数勾选结果，算准确率。"""
     text = path.read_text(encoding="utf-8")
@@ -429,14 +494,20 @@ async def _main(args: argparse.Namespace) -> int:
         files = files[: args.limit]
     base_dir = files[0].parent
 
+    # 先判账号身份再判别的：用错账号写脏数据是不可逆的，缺 Key 是可逆的。
+    # 顺序反过来会出现"先花时间配 Key，跑起来才发现账号选错"。
+    user = await _find_user(args.user, allow_owner=args.allow_owner)
+    user_id, username, role = user
+    if role == "owner":
+        print("⚠️  正在用 owner 账号跑（--allow-owner）：测试数据会真的写进你自己的档案。")
+
     key = settings.deepseek_api_key.get_secret_value() if settings.deepseek_api_key else None
     if not key:
         print("❌ DEEPSEEK_API_KEY 是空的。先填 .env，再跑 scripts/check_model.py 确认能看图。")
         return 2
 
-    user_id = await _find_user(args.user)
     count = await _person_count(user_id)
-    print(f"账号 {args.user}（id={user_id}），名下 {count} 个联系人")
+    print(f"账号 {username}（id={user_id}，{role}），名下 {count} 个联系人")
     if count == 0:
         print("\n❌ 这个账号还没有任何联系人。")
         print("   截图里的那个人必须先在系统里存在，否则模型判不出归属，事实不会落库。")
@@ -487,6 +558,8 @@ async def _main(args: argparse.Namespace) -> int:
 
     out = Path(args.out).expanduser() if args.out else base_dir / "抽取核对.md"
     _write_report(items, out, person_name)
+    if args.json_out:
+        _write_json(items, Path(args.json_out).expanduser(), user, settings.vision_model)
     return 0
 
 
@@ -503,6 +576,16 @@ def main() -> int:
     parser.add_argument("--person-id", type=int, default=None, help="强制挂到某个人身上")
     parser.add_argument("--limit", type=int, default=None, help="只跑前 N 张")
     parser.add_argument("--out", default=None, help="核对表输出路径")
+    parser.add_argument(
+        "--json-out",
+        default=None,
+        help="把每张图的 status/事实/事件/往来/重复/错误写成 JSON（给脚本吃）",
+    )
+    parser.add_argument(
+        "--allow-owner",
+        action="store_true",
+        help="允许对 owner 账号跑（默认拒绝：会往你自己的档案里写测试数据）",
+    )
     parser.add_argument("--score", default=None, help="传入核对表路径，算准确率")
     return asyncio.run(_main(parser.parse_args()))
 
