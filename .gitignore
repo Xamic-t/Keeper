@@ -46,3 +46,6 @@ e2e/node_modules/
 e2e/artifacts/
 e2e/last-summary.json
 .env.e2e
+
+# ---- start.sh 的运行时目录（PID 与日志）----
+.run/
