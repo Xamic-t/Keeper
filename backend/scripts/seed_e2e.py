@@ -28,7 +28,10 @@ from sqlalchemy import delete, select  # noqa: E402
 from app.core.clock import local_today  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.db import SessionLocal, engine  # noqa: E402
-from app.models.event import Event  # noqa: E402
+from app.models.event import Event, Reminder  # noqa: E402
+from app.models.fact import Fact, Tag  # noqa: E402
+from app.models.input import ChatSegment, RawInput  # noqa: E402
+from app.models.ledger import Ledger  # noqa: E402
 from app.models.person import Person  # noqa: E402
 from app.models.relationship import Relationship  # noqa: E402
 from app.models.todo import Todo  # noqa: E402
@@ -86,13 +89,25 @@ async def get_or_create_user(username: str, password: str) -> User:
 
 
 async def purge_business_data(user_id: int) -> None:
-    """删掉该账号的业务数据。顺序按外键依赖来，先子后父。
+    """删掉该账号的全部业务数据。顺序按外键依赖来，先子后父。
 
-    todos 的 person_id 是 SET NULL，不会跟着人删，所以单独删。
+    不只清这四张：用例中断会留下事实、往来、材料等垃圾，
+    "幂等"要覆盖到它们，否则脏数据会慢慢堆。
     """
     async with SessionLocal() as session:
         session.info["rls_user_id"] = user_id
-        for model in (Todo, Event, Relationship, Person):
+        for model in (
+            Todo,
+            Reminder,
+            Fact,
+            Tag,
+            Ledger,
+            ChatSegment,
+            RawInput,
+            Event,
+            Relationship,
+            Person,
+        ):
             await session.execute(delete(model).where(model.user_id == user_id))  # type: ignore[attr-defined]
         await session.commit()
 

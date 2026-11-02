@@ -36,7 +36,7 @@ export interface RelationshipOut {
   stage_source: string
   birthday_type: string | null
   birthday_solar: string | null
-  birthday_lunar: Record<string, unknown> | null
+  birthday_lunar: { month: number; day: number; is_leap?: boolean } | null
   gift_budget_min: string | null
   gift_budget_max: string | null
   taboo: string[]

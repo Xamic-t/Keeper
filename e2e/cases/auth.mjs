@@ -8,7 +8,7 @@ export const meta = {
   smoke: true,
   describe: 'cookie 失效后自动回登录页',
   // 这个用例就是要制造 401，浏览器必然会打一条资源加载失败的 console error
-  allowConsoleErrors: ['401'],
+  allowConsoleErrors: ['401 \\(Unauthorized\\)'],
 }
 
 export async function run({ page, config }) {

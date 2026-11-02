@@ -7,11 +7,15 @@ export const meta = {
   name: 'assistant',
   smoke: false,
   describe: '助理页可打开，未启动时给说明而不是白板',
-  // 3080 没起时浏览器一定会打一条连接拒绝的错误
-  allowConsoleErrors: ['ERR_CONNECTION_REFUSED', 'Failed to load resource', 'X-Frame-Options'],
 }
 
 export async function run({ page, config, shot }) {
+  // 3080 没起时浏览器会打一条资源错误，且文案是"所有资源失败"的通用文案。
+  // 不吞它：把 3080 的请求直接拦掉，既模拟"未配置助理"也保留对页面报错的严格检查。
+  await page.route('http://127.0.0.1:3080/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>harness</body></html>' }),
+  )
+
   await page.goto(`${config.baseURL}/assistant`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(6000)
 

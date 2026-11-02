@@ -96,14 +96,21 @@ function personName(id: number | null) {
   return persons.value.find((item) => item.id === id)?.nickname ?? ''
 }
 
+/** 本地今天，格式 YYYY-MM-DD。不能用 toISOString()，那是 UTC，晚上会差一天。 */
+function todayString() {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
 /** 今天/明天/逾期，比裸日期好读 */
 function dueLabel(due: string | null) {
   if (!due) return ''
-  const today = new Date()
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const todayText = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`
+  const todayText = todayString()
   if (due === todayText) return '今天'
-  const tomorrow = new Date(today.getTime() + 86400000)
+  const tomorrow = new Date()
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const pad = (n: number) => String(n).padStart(2, '0')
   const tomorrowText = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(
     tomorrow.getDate(),
   )}`
@@ -113,7 +120,7 @@ function dueLabel(due: string | null) {
 
 function dueClass(due: string | null) {
   if (!due) return 'tag'
-  return due < new Date().toISOString().slice(0, 10) ? 'tag text-danger' : 'tag'
+  return due < todayString() ? 'tag text-danger' : 'tag'
 }
 
 onMounted(async () => {

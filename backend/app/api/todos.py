@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError, ErrorCode
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
 from app.services import todo as todo_service
@@ -118,7 +119,17 @@ async def update_todo(
     payload: TodoUpdateIn,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> dict[str, Any]:
-    """status 改成 done 会自动写 done_at，改回 open 会清空。"""
+    """status 改成 done 会自动写 done_at，改回 open 会清空。
+
+    title / status 是必填字段。它们不能置空；显式传 null 不是"没传"，
+    而是客户端写错了——以前会静默 200 什么也不改，又是一个假成功。
+    可空字段的 None 语义由 service 处理（显式清空）。
+    """
+    if payload.title is None and "title" in payload.model_fields_set:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "标题不能为空", status_code=400)
+    if payload.status is None and "status" in payload.model_fields_set:
+        raise AppError(ErrorCode.VALIDATION_ERROR, "状态不能为空", status_code=400)
+
     item = await todo_service.update_todo(session, todo_id, payload.model_dump(exclude_unset=True))
     return ok(_out(item))
 

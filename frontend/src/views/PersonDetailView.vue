@@ -70,6 +70,18 @@ const stageLabel = computed(
   () => STAGES.find((item) => item.value === detail.value?.relationship.stage)?.label ?? '未知',
 )
 const stageIsManual = computed(() => detail.value?.relationship.stage_source === 'manual')
+/** 公历直接显示；农历按库里存的 month/day/is_leap 拼出来，别显示"没记"骗人。 */
+const birthdayText = computed(() => {
+  const rel = detail.value?.relationship
+  if (!rel) return ''
+  if (rel.birthday_type === 'lunar' && rel.birthday_lunar) {
+    const month = rel.birthday_lunar.month
+    const day = rel.birthday_lunar.day
+    const leap = rel.birthday_lunar.is_leap ? '闰' : ''
+    return month ? `农历${leap}${month}月${day}日` : '没记'
+  }
+  return rel.birthday_solar ?? '没记'
+})
 
 function todayInput() {
   // 日期输入框只认 YYYY-MM-DD，用本地时间拼，别用 toISOString（会差一天）
@@ -418,7 +430,7 @@ onMounted(load)
         </div>
         <div class="flex items-center justify-between px-4 py-3 text-sm">
           <span class="text-ink-soft">生日</span>
-          <span>{{ detail.relationship.birthday_solar ?? '没记' }}</span>
+          <span>{{ birthdayText }}</span>
         </div>
         <div class="flex items-center justify-between px-4 py-3 text-sm">
           <span class="text-ink-soft">收 / 付</span>

@@ -11,9 +11,11 @@
 
 from datetime import date
 
+import httpx
+
 from app.models.todo import Todo
 from app.services import todo as todo_service
-from tests.conftest import Account, rls_session
+from tests.conftest import Account, csrf_headers, login, rls_session
 
 
 async def _make_todo(user: Account, due: date | None = None) -> int:
@@ -73,3 +75,23 @@ async def test_null_status_is_ignored(single_user: Account) -> None:
         updated = await todo_service.update_todo(session, todo_id, {"status": None})
 
     assert updated.status == "open"
+
+
+async def test_null_title_via_api_is_rejected(
+    client: httpx.AsyncClient, single_user: Account
+) -> None:
+    """必填字段显式传 null 不能装成"没传"：400 且原值不变。"""
+    async with rls_session(single_user.id) as session:
+        todo = await todo_service.create_todo(session, single_user.id, title="原标题")
+    assert todo.id is not None
+
+    csrf_token = await login(client, single_user)
+    response = await client.patch(
+        f"/api/todos/{todo.id}", json={"title": None}, headers=csrf_headers(csrf_token)
+    )
+
+    assert response.status_code == 400
+    async with rls_session(single_user.id) as session:
+        fresh = await session.get(Todo, todo.id)
+        assert fresh is not None
+        assert fresh.title == "原标题"
