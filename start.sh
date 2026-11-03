@@ -262,6 +262,14 @@ cmd_status() {
   local healthy
   healthy=$(docker compose ps db 2>/dev/null | grep -c '(healthy)' || true)
   echo "数据库：${healthy:-0} 个 healthy 容器"
+
+  # 手机怎么进：这台机器的内网 IP + 前端端口。后端只监听 127.0.0.1，
+  # 手机不需要直连 8000——Vite 会把 /api 转给本机后端，所以只暴露 5173 一个端口。
+  local lan_ip
+  lan_ip=$(ipconfig getifaddr en0 2>/dev/null || echo "")
+  if [[ -n "$lan_ip" ]]; then
+    echo "手机访问（同一 WiFi）：http://${lan_ip}:${FRONTEND_PORT}"
+  fi
 }
 
 cmd_logs() {
