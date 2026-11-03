@@ -224,16 +224,6 @@ onMounted(load)
       <p v-if="message" class="mt-2 text-xs text-accent-deep">{{ message }}</p>
     </section>
 
-    <section class="card mb-4 p-4">
-      <h2 class="mb-2 text-sm font-medium">助理</h2>
-      <p class="mb-3 text-xs text-ink-soft">
-        能问「我今天该联系谁」「王姐喜欢什么」，只读，不改任何数据。
-        它是个独立进程，需要先 <code class="rounded bg-bg-alt px-1">cd harness && ./run.sh</code>。
-      </p>
-      <RouterLink :to="{ name: 'assistant' }" class="btn btn-ghost w-full">
-        打开助理
-      </RouterLink>
-    </section>
 
     <section class="card mb-4 p-4">
       <h2 class="mb-2 text-sm font-medium">改密码</h2>
@@ -265,11 +255,6 @@ onMounted(load)
       </form>
     </section>
 
-    <section v-if="auth.user?.role === 'owner'" class="card mb-4 p-4">
-      <h2 class="mb-2 text-sm font-medium">账号管理</h2>
-      <p class="mb-3 text-xs text-ink-soft">建号、禁用、重置密码；只有 owner 能进。</p>
-      <RouterLink :to="{ name: 'admin' }" class="btn btn-ghost">打开账号管理</RouterLink>
-    </section>
 
     <section class="card mb-4 p-4">
       <h2 class="mb-2 text-sm font-medium">数据</h2>

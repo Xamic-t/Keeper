@@ -2,23 +2,16 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
+import { BUSINESS_NAV } from '@/nav'
 import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 
-// 助理是**一级菜单**（2026-11-03 用户明确要求）：桌面和手机都要有。
-// 之前它只在桌面侧栏出现、手机上要从设置绕进去，等于没有。
-const navItems = [
-  { name: 'today', label: '今日', icon: '◎' },
-  { name: 'ingest', label: '投喂', icon: '↥' },
-  { name: 'assistant', label: '助理', icon: '✦' },
-  { name: 'persons', label: '人', icon: '☺' },
-  { name: 'confirm', label: '确认', icon: '✓' },
-  { name: 'calendar', label: '日历', icon: '▦' },
-  { name: 'todos', label: '待办', icon: '☑' },
-]
+// 一级菜单只从 nav.ts 取：那份是导航的唯一事实源，
+// router/ia.test.ts 会断言"每条路由都被归类"，避免再出现"页面加了、旧入口没删"。
+const navItems = BUSINESS_NAV
 // 管理后台**不混在业务菜单里**（2026-11-03 用户明确要求）：它是独立界面，
 // 入口放在左下角账号区，和「设置」并列但单独一行、带分隔线。
 const isOwner = computed(() => auth.user?.role === 'owner')
