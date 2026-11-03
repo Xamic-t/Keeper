@@ -20,7 +20,7 @@ from collections.abc import AsyncGenerator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -29,9 +29,13 @@ from app.core.response import DataResponse, ok
 from app.db import SessionLocal
 from app.models.ledger import Ledger
 from app.services import assistant as assistant_service
+from app.services import assistant_token
+from app.services import conversation as conversation_service
+from app.services import embedding as embedding_service
 from app.services import ledger as ledger_service
 from app.services import person as person_service
 from app.services import profile as profile_service
+from app.services import rag as rag_service
 from app.services import today as today_service
 from app.services.person import PersonDetailData
 
@@ -47,24 +51,32 @@ async def assistant_session(
     先开一个不带变量的系统 session 去查 users（users 表没开 RLS），
     拿到 user_id 之后再开业务 session —— 和 `deps.get_session` 是同一套做法。
     """
-    expected = settings.assistant_token
-    if expected is None:
-        raise AppError(
-            ErrorCode.INTERNAL_ERROR,
-            "助理接口未启用：没有配置 ASSISTANT_TOKEN",
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        )
-    # 常量时间比对，避免用响应时间猜 token
-    if not token or not secrets.compare_digest(token, expected.get_secret_value()):
-        raise AppError(
-            ErrorCode.UNAUTHENTICATED,
-            "助理 token 不对",
-            status_code=status.HTTP_401_UNAUTHORIZED,
-        )
+    # 两种令牌，优先"用户级短期令牌"：
+    #   ① v1.<uid>.<exp>.<sig> —— 主服务每轮签给 Harness 子进程，绑定具体用户
+    #   ② 全局 ASSISTANT_TOKEN —— 老路径，代表 ASSISTANT_USERNAME 那一个人
+    # 没有 ① 的话，tester 让助理建待办会建到 Admin 名下（越权），见 docs/38 A2。
+    scoped_user_id = assistant_token.verify(token) if token else None
 
-    async with SessionLocal() as probe:
-        user = await assistant_service.resolve_user(probe)
-        user_id = user.id or 0
+    if scoped_user_id is not None:
+        user_id = scoped_user_id
+    else:
+        expected = settings.assistant_token
+        if expected is None:
+            raise AppError(
+                ErrorCode.INTERNAL_ERROR,
+                "助理接口未启用：没有配置 ASSISTANT_TOKEN",
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        # 常量时间比对，避免用响应时间猜 token
+        if not token or not secrets.compare_digest(token, expected.get_secret_value()):
+            raise AppError(
+                ErrorCode.UNAUTHENTICATED,
+                "助理 token 不对",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+            )
+        async with SessionLocal() as probe:
+            user = await assistant_service.resolve_user(probe)
+            user_id = user.id or 0
 
     async with SessionLocal() as session:
         session.info["rls_user_id"] = user_id
@@ -103,6 +115,13 @@ class PersonListOut(BaseModel):
     items: list[PersonBrief]
 
 
+class PersonDateOut(BaseModel):
+    type: str
+    title: str
+    occurs_on: str
+    in_days: int
+
+
 class PersonDetailOut(BaseModel):
     id: int
     nickname: str
@@ -116,6 +135,8 @@ class PersonDetailOut(BaseModel):
     total_in: str = "0"
     total_out: str = "0"
     counts: dict[str, int] = {}
+    # 接下来的日子（生日/结款/自定义），模型回答"她生日哪天"靠它
+    dates: list[PersonDateOut] = []
 
 
 class FactOut(BaseModel):
@@ -223,6 +244,10 @@ async def assistant_person(session: Session, person_id: int) -> dict[str, Any]:
             total_in=str(relationship.total_in),
             total_out=str(relationship.total_out),
             counts=detail.counts,
+            dates=[
+                PersonDateOut(**item)
+                for item in await assistant_service.person_dates(session, person_id)
+            ],
         )
     )
 
@@ -294,3 +319,84 @@ async def assistant_ledger(
     rows, _total = await ledger_service.list_ledger(session, person_id, offset=0, limit=limit)
     detail = await person_service.get_person_detail(session, person_id)
     return ok(_ledger_out(rows, detail, person_id))
+
+
+# ── RAG 检索（2026-11-04 新增）──────────────────────────
+class SearchItemOut(BaseModel):
+    content: str
+    source_type: str
+    source_id: int | None = None
+    person_id: int | None = None
+    scope: str
+    score: float
+
+
+class SearchOut(BaseModel):
+    query: str
+    semantic: bool
+    items: list[SearchItemOut]
+
+
+@router.get("/search", response_model=DataResponse[SearchOut], summary="检索资料（RAG）")
+async def assistant_search(
+    session: Session,
+    q: Annotated[str, Query(min_length=1, max_length=200)],
+    limit: Annotated[int, Query(ge=1, le=20)] = 5,
+) -> dict[str, Any]:
+    """按语义（或关键词）找"哪份材料提过这件事"。
+
+    `semantic=false` 表示没配向量模型、这次走的是关键词匹配：
+    模型看到这个字段就该知道"没搜到不代表没记过"，而不是断言"你没提过"。
+    """
+    items = await rag_service.search(session, q, limit=limit)
+    return ok(
+        SearchOut(
+            query=q,
+            semantic=embedding_service.available(),
+            items=[SearchItemOut(**item) for item in items],
+        )
+    )
+
+
+# ── 写操作（2026-11-04：Harness 这条路上模型也要能建东西）──────
+# 为什么只有一个端点、不按动作分三个：
+# 写操作的校验（人名解析、日期解析、类型白名单、上限）全在
+# `conversation.execute_actions` 里，那是内置对话与 Harness **共用**的一份实现。
+# 在这里再拆三个端点，等于把同一套规则抄三遍，迟早有两份不一致。
+class ActionIn(BaseModel):
+    """一条动作。字段名与 `execute_actions` 认的 payload 完全一致。"""
+
+    type: str = Field(description="create_todo / create_event / add_fact")
+    title: str | None = None
+    person: str | None = Field(default=None, description="对方昵称，认不出就不会建")
+    due_on: str | None = None
+    event_type: str | None = None
+    occurs_on: str | None = None
+    content: str | None = None
+    category: str | None = None
+
+
+class ActionResultOut(BaseModel):
+    type: str
+    ok: bool
+    summary: str
+    ref_id: int | None = None
+    reason: str | None = None
+
+
+@router.post(
+    "/actions",
+    response_model=DataResponse[ActionResultOut],
+    summary="执行一条写操作（建待办 / 建事件 / 记事实）",
+)
+async def assistant_action(session: Session, payload: ActionIn) -> dict[str, Any]:
+    """白名单之外的类型直接拒（§19.7.10）。记事实只落 pending，不进档案。
+
+    返回 `ok=false` 时 `reason` 是给模型看的原因（"没认出是哪个人"），
+    模型据此反问用户，而不是硬编一个。
+    """
+    user_id = int(session.info.get("rls_user_id") or 0)
+    result = await conversation_service.run_single_action(
+        session, user_id, payload.model_dump(exclude_none=True)
+    )
+    return ok(ActionResultOut(**result.as_dict()))

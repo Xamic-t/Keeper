@@ -85,6 +85,8 @@
 | **关系温度** | 五维打分驱动活跃窗口 | V2 |
 | **需求感知** | 温度 × 场景的 2×2 判断 | V2 |
 | **对话式问答** | 混合检索路由 | V2 |
+| **助理编排** | DeepSeek Harness 驱动（工具调用可见），主服务只做 BFF | V2（2026-11-03 起） |
+| **RAG 检索** | 投喂/事实 → 切片 + 向量（百炼 text-embedding-v3）→ `keeper_search` 工具；没配 key 时切片照写、检索退化为关键词 | V2（✅ 2026-11-04 上线） |
 
 ## 5. 边界：明确不做
 
@@ -256,7 +258,7 @@ Flask 和 FastAPI 同属微框架，为什么不选更"经典"的？
 
 | 能力 | 库 | 用在哪 |
 |---|---|---|
-| ORM | SQLModel | 14 张 V1 表的定义与查询（2026-11-03 新增 `chat_messages`；V2 三张未建，见 19.3） |
+| ORM | SQLModel | 15 张表（V1 14 张 + V2 `vector_chunks`；`agent_runs` / `temperature_snapshots` 未建，见 19.3） |
 | 迁移 | Alembic | 建表、改表 |
 | 配置 | pydantic-settings | 读 `.env` |
 | 密码哈希 | argon2-cffi | 登录 |
@@ -648,7 +650,7 @@ scripts/                  # 仓库根：不 import app 的 shell 运维脚本（
 | `app/core/security.py` | 安全原语 | argon2 哈希、cookie 签发、CSRF token | 登录流程编排（属 service） | 无（`argon2-cffi` / `itsdangerous`） | `security.py`（98 行） | 【项目】 |
 | `app/api/router.py` | 路由汇总 | 每个模块一行 `include_router` | 任何路由函数本体 | `APIRouter(prefix="/api")` | `router.py`（45 行） | 【框架】 |
 | `app/api/*.py` | 路由层 | 一个业务模块一个文件：取参数、调 service、返回；**该模块的请求/响应模型** | 数据库查询、业务判断、模型调用、超过 30 行的函数 | `APIRouter`、`response_model`、`Depends` | `api/health.py`（35 行，规模参考） | 【框架】 |
-| `app/models/` | 表定义 | SQLModel 类：字段、约束、关系、`__tablename__` | 任何 `select()` / `session.exec()`、业务方法 | SQLModel / SQLAlchemy 2.0 | 14 张 V1 表（见 `models/__init__.py`） | 【项目】 |
+| `app/models/` | 表定义 | SQLModel 类：字段、约束、关系、`__tablename__` | 任何 `select()` / `session.exec()`、业务方法 | SQLModel / SQLAlchemy 2.0 | 15 张表（见 `models/__init__.py`） | 【项目】 |
 | `app/services/` | 业务逻辑 | 一条业务主线的完整实现，可脱离 HTTP 单测 | `from fastapi import Request`、`JSONResponse` | 无（纯 Python，方便 pytest） | `services/person.py`、`services/reminder.py` | 【项目】 |
 | `app/jobs/` | 定时任务 | 任务入口函数，内部调 service | 业务逻辑（应下沉到 service） | `APScheduler` | `jobs/daily.py`（`--serve` 常驻 + 单次） | 【项目】 |
 | `alembic/versions/` | 迁移脚本 | 每个版本一个文件，顶部写清对应文档与回滚影响 | 手工改库留下的临时 SQL | Alembic | `alembic/versions/0001–0006` | 【工具】 |
@@ -1084,11 +1086,11 @@ async def create_user(..., _: User = Depends(require_owner)):
 
 | 项 | 现状 | 决定 | 结果 |
 |---|---|---|---|
-| `vector_chunks` 表 | **未建** | 推迟到 V2 | V1 少一张空表 |
+| `vector_chunks` 表 | **✅ 已建（迁移 0008）** | pgvector 0.8.7 + HNSW；`embedding vector(1024)` 可空 | RAG 的落点 |
 | `temperature_snapshots` 表 | **未建** | 推迟到 V2 | 同上 |
-| `agent_runs` 表 | **未建** | 推迟到 V2 | 同上 |
+| `agent_runs` 表 | **未建** | V2 第二批（记录每轮 Harness：session/工具序列/耗时/token） | 可观测性 |
 
-**结论**：V1 实际 **14 张表**（12 个业务对象 + `extraction_logs` + `notification_channels`；2026-11-03 增 `chat_messages`），
+**结论**：V1 实际 **14 张表**（12 个业务对象 + `extraction_logs` + `notification_channels`；2026-11-03 增 `chat_messages`），V2 已加第 15 张 `vector_chunks`（RAG），
 不是早期文档写的 15 张。字段清单以 `docs/06` 和 `backend/app/models/` 为准。
 
 **理由**：这三张表 V1 一行数据都不会写；建了只会让迁移、RLS、备份多三份维护成本。
@@ -1377,6 +1379,72 @@ Python 从 Postgres 读
 | 记事实只进确认队列 | `add_fact` 落 `status=pending`，用户在确认页点过才算数 |
 | 执行结果进对话气泡 | 「✅ 已创建待办 · 查看」，用户当场能看见、能去删 |
 
+#### 19.7.11 2026-11-03 晚：Harness 回归编排层（用户在 V2 明确要求）
+
+> **已被 19.7.12 取代一半**：接入形态从 `headless`（一轮一进程）换成常驻 `sdk` 进程，
+> 其余决策（BFF、用户级令牌、写操作白名单、降级）全部沿用。看结论直接跳到 19.7.12。
+
+用户原话：「我就要 DeepSeek Harness，不要主服务原生对话」「不要另开窗口的意思是
+给我融合到下面 7 个菜单栏里面」。所以：**编排交回 Harness，界面仍是那 7 个 tab 里的「助理」**。
+
+| 项 | 决定 |
+|---|---|
+| 接入形态 | `dsh --profile headless`：**一轮一个子进程**，不开端口、不留常驻状态、不用粘 token |
+| 与前端的关系 | 主服务当 BFF：`POST /api/conversation/turn/stream` 把 dsh 的 NDJSON 转成 SSE；页面不变 |
+| 身份 | 每轮签 `v1.<uid>.<exp>.<sig>` 用户级令牌（HMAC，3 分钟），工具以**当前用户**身份调接口；不再用全局 token 冒充 owner |
+| 工具 | keeper-tools 现有 5 个只读；V2 扩写工具（建待办/事件/记事实/往来）+ `keeper_search`（RAG） |
+| 写操作边界 | 沿用 19.7.10：白名单、一轮 ≤3、`add_fact` 只落 pending |
+| 降级 | dsh 没装/超时/崩 → 自动回退 `services/conversation.py`，页面不报错 |
+| 不采用 | Web UI / iframe / 3080 端口 / 粘 token：这三件正是 19.7.10 里被用户否决的东西 |
+
+**实测到的硬伤（待解）**：dsh 单次进程冷启动 **28–36 秒**（四次测量 30.8 / 36.4 / 28.1 / 31.9），
+裁剪插件与开启 Node 编译缓存只省 4 秒左右——这是它加载整套插件图的固有成本。
+因此下一批要把它换成**常驻 SDK 进程**（`dsh --profile sdk`，stdio JSON-RPC：
+`initialize` / `session/prompt` / `session/event` / `session/wait`），
+按用户懒启动并闲置回收，目标是每轮 2–3 秒。在换完之前，BFF 会先推一条
+「Harness 启动中，首次约 30 秒」的提示，不让界面看起来像卡死。
+
+#### 19.7.12 2026-11-04：编排换成常驻 SDK 进程，RAG 上线
+
+**问题**：19.7.11 的 `dsh --profile headless` 是"一轮一个进程"，实测每轮冷启动
+**26–36 秒**（四次测量：30.8 / 36.4 / 28.1 / 31.9）。发一句话等半分钟，不是慢，是不能用。
+裁插件、开 Node 编译缓存只省 4 秒——这是加载整套插件图的固有成本。
+
+**改法**：同一个运行时，换成 `dsh --profile sdk`（stdio JSON-RPC，`initialize` /
+`session/prompt` / `session.event` / `session/wait` / `shutdown`），进程常驻。
+
+| 指标 | headless（一轮一进程） | **sdk 常驻（现行）** |
+|---|---|---|
+| 首次 26s 冷启动 | 每轮都付 | **只付一次**（initialize 26.1s） |
+| 第 1 轮 | 30s | **2.2s** |
+| 第 2 轮起 | 30s | **0.74s** |
+| 端到端（含 SSE + 落库） | 30s | **3.2s / 4.0s**（真浏览器与 curl 各测一次） |
+| 工具调用可视化 | NDJSON → SSE | `session.event` 的 `tool/call` / `tool/result` → SSE（同一条协议） |
+
+**四个实现约束，缺一个都会出问题**：
+
+| 约束 | 为什么 |
+|---|---|
+| **一个用户一个进程** | `keeper-tools` 在模块加载时读 `KEEPER_ASSISTANT_TOKEN`（`const TOKEN = ...`），一个进程只能有一个身份。多用户共进程 = 越权 |
+| **登录后预热**（`harness.schedule_prewarm`） | 冷启动还有 26 秒，挪到"用户还在点页面"的时候。打开助理页也会触发 |
+| **闲置 15 分钟回收 / 90 分钟强制重启** | 前者回收 Node 内存；后者换新令牌（令牌 TTL 2 小时，进程活多久令牌就活多久） |
+| **会话 id 每进程唯一**（`keeper-{uid}-{ts}`） | dsh 会把会话落盘，跨进程复用同一 id 会报 `session already exists`。历史由我们自己管（`conversation.recent_dialogue`），不靠侧车续聊 |
+
+失败语义不变：进程崩/超时 → 丢掉进程 → 这一轮回退内置对话（`services/conversation.py`）。
+
+**RAG（同一天上线）**：
+
+| 项 | 决定 |
+|---|---|
+| 表 | `vector_chunks`（迁移 0008，pgvector 0.8.7 + HNSW 余弦，RLS 与其它业务表一致） |
+| 写入时机 | 事实**确认后**（`confirm_fact`）+ 投喂识别完成后（`extract`）；待确认的猜测一律不进索引 |
+| 检索 | `services/rag.search`：有 key 走向量（`embedding <=> vec`），没 key 走关键词（ILIKE，`semantic=false` 如实告诉模型） |
+| 工具 | `keeper_search` → `GET /api/assistant/search`（service token，RLS 照旧） |
+| 降级 | 没配 `DASHSCOPE_API_KEY` 时切片照写、`embedding` 为 NULL，功能不消失只是变弱；配上 key 跑 `scripts/reindex.py` 补齐 |
+| 不引新依赖 | 自己写了一个 `VectorType`（bind 成 `'[..]'` 文本），不为一个字段引 `pgvector` 这个 Python 包 |
+
+**已知遗留**：`dsh` 会话文件会落在 `~/.dsh/sessions`，我们没有清理策略（只影响磁盘，不影响数据正确性）。
+
 ---
 
 # 第三部分 · 文档地图
@@ -1390,7 +1458,7 @@ Python 从 Postgres 读
 | [`02-产品设计`](./02-产品设计.md) | 界面、流程、功能清单、版本范围 | 写页面前 |
 | [`03-数据与技术`](./03-数据与技术.md) | AI 链路、温度模型、可解释性 | 写 AI 相关逻辑前 |
 | [`05-产品形态与技术栈`](./05-产品形态与技术栈.md) | 唯一技术方案、选型理由 | 开工前、换栈时 |
-| [`06-数据库设计`](./06-数据库设计.md) | **V1 13 张表**的字段、约束、索引、范式校验 | **改表前必读** |
+| [`06-数据库设计`](./06-数据库设计.md) | **15 张表**的字段、约束、索引、范式校验 | **改表前必读** |
 | [`07-后端设计`](./07-后端设计.md) | 接口总表、认证、校验、异常、降级；**数量以代码/OpenAPI 为准** | **写后端前必读** |
 | [`04-计划与验收`](./04-计划与验收.md) | 里程碑、四层验收、止损信号 | 每周对照 |
 
@@ -1435,6 +1503,8 @@ Python 从 Postgres 读
 
 | 日期 | 版本 | 变更 |
 |---|---|---|
+| 2026-11-04 | v3.1 | **V2 首批落地**：① 新增 19.7.12——编排从 `headless` 一轮一进程换成**常驻 sdk 进程**（26s 冷启动只付一次，第 2 轮起 0.74s；一个用户一个进程 + 登录预热 + 闲置回收）；② RAG 上线：`vector_chunks`（迁移 0008）+ `keeper_search` + 无 key 降级关键词；③ §4 RAG 行转「✅ 上线」；④ 表数 14 → 15 |
+| 2026-11-03 | v3.0 | **V2 开工**：① §4 新增「助理编排 = Harness」与「RAG 检索」两行；② 新增 19.7.11（Harness 回归编排层：headless 子进程 + 用户级令牌 + 写工具白名单 + 工具调用可视化 + 冷启动实测 28–36s 与换常驻 SDK 的计划）；③ §19.3 `vector_chunks` 转「V2 进行中」、`agent_runs` 排到第二批 |
 | 2026-11-03 | v2.9 | 管理后台口径（D7-A）：§4「管理」从「owner 账号列表 + 建号/禁用/重置密码」改为「独立管理后台：概览 + 账号 + 行为量 + 系统」；新增 `/api/admin/overview`（只出数量、不出内容，不为 RLS 加旁路） |
 | 2026-11-03 | v2.8 | 助理口径变更（D6-A）：① §4 助理从「Harness 侧车 / V1 基础」改为「主界面自研对话 / V1」；② 新增 19.7.10（自研前端 + 写操作白名单，Harness 降为可选）；③ §6 拓扑注明侧车默认不启、前端零依赖；④ 表数 13 → 14（新增 `chat_messages`） |
 | 2026-11-03 | v2.7 | ① 11.1/11.3 补仓库根 `scripts/` 目录与「两个 scripts 的分工」——N 批次新增 `preflight_deploy.sh`，属事实性目录说明，不改任何要求；② 无其它口径变更（RLS 全表审计通过，未改设计） |

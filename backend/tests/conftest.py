@@ -27,6 +27,18 @@ from app.main import app
 
 TEST_PASSWORD = "Test-pass-123"
 
+
+@pytest.fixture(autouse=True)
+def _no_harness_prewarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """测试里不许预热 Harness。
+
+    每个用例都会建号登录，而登录会顺手预热助理进程——那意味着跑一次测试
+    要起几十个 Node 子进程、往 data/harness 里拉几十个目录。预热是线上体验优化，
+    测试里没有任何价值，直接关掉。
+    """
+    monkeypatch.setattr(settings, "harness_prewarm", False)
+
+
 # 建账号/清账号用的同步引擎。psycopg 同时支持同步与异步驱动，
 # 这里用同步是为了不跟 pytest 的事件循环纠缠。
 _sync_engine = create_engine(settings.database_url, pool_pre_ping=True)

@@ -14,6 +14,7 @@ from app.models.person import Person
 from app.models.relationship import Relationship
 from app.models.todo import Todo
 from app.models.user import User
+from app.models.vector import VectorChunk
 
 __all__ = [
     "ChatMessage",
@@ -30,4 +31,5 @@ __all__ = [
     "Tag",
     "Todo",
     "User",
+    "VectorChunk",
 ]

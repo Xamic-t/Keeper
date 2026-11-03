@@ -17,6 +17,7 @@ from app.config import settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import setup_logging
 from app.db import dispose_engine, engine
+from app.services import harness
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     _assert_secret_key_is_safe()
     await _assert_database_role_respects_rls()
     yield
+    await harness.shutdown_all()
     await dispose_engine()
     logger.info("app stopped")
 

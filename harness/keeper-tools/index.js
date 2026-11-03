@@ -49,6 +49,30 @@ async function get(path, query) {
   return payload.data
 }
 
+/**
+ * 写一条动作。和 get 的区别只有 method 和 body，
+ * 错误处理一样：把主服务说的原因原样交给模型（它会据此反问用户）。
+ */
+async function post(path, body) {
+  if (!TOKEN) {
+    throw new Error('KEEPER_ASSISTANT_TOKEN 没配，助理接口调不通')
+  }
+  const response = await fetch(API + path, {
+    method: 'POST',
+    headers: {
+      'X-Assistant-Token': TOKEN,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(`Keeper API ${response.status} ${path}: ${text.slice(0, 200)}`)
+  }
+  return (await response.json()).data
+}
+
 /** 统一的输出投影：原样 JSON 给模型看。 */
 function jsonOutput(description) {
   return {
@@ -138,6 +162,105 @@ export function apply(ctx) {
         return await get('/api/assistant/ledger', {
           person_id: args.person_id,
           limit: args.limit,
+        })
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'keeper_search',
+      description:
+        '按语义在历史材料里检索：以前聊过什么、哪份截图提过这件事、谁说过某句话。' +
+        '用户问"上次她说预算紧是怎么回事""我是不是记过这个"时用它——keeper_facts 只给结论，这里给原文片段。' +
+        '返回里的 semantic=false 表示这次是关键词匹配，没搜到不代表没记过。',
+      parameters: {
+        q: { type: 'string', description: '要查的事，用自然语言，比如"预算紧"', required: true },
+        limit: { type: 'integer', description: '返回几段，默认 5' },
+      },
+      output: jsonOutput('检索到的原文片段'),
+      async execute(args) {
+        return await get('/api/assistant/search', { q: args.q, limit: args.limit })
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'keeper_create_todo',
+      description:
+        '建一条待办。用户说"提醒我""记一下要做什么""11 月 4 号要准备礼物"时用。' +
+        '给了人名就必须填 person（昵称），系统会去认；认不出会返回 ok=false，' +
+        '这时要反问用户是谁，**不要换个名字硬建**。日期用 YYYY-MM-DD。',
+      parameters: {
+        title: { type: 'string', description: '待办内容，一句话，不超过 100 字', required: true },
+        person: { type: 'string', description: '跟谁有关，填昵称，比如"王姐"' },
+        due_on: { type: 'string', description: '截止日期 YYYY-MM-DD，没有就不填' },
+      },
+      output: jsonOutput('创建结果'),
+      async execute(args) {
+        return await post('/api/assistant/actions', {
+          type: 'create_todo',
+          title: args.title,
+          person: args.person,
+          due_on: args.due_on,
+        })
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'keeper_create_event',
+      description:
+        '记一个日子（生日 / 结款 / 纪念日）。用户说"她生日是 11 月 4 号""月底该结款了"时用。' +
+        '必须能认出人（person 填昵称），认不出就反问。event_type 只能是 ' +
+        'birthday / payment_due / anniversary / festival / custom。',
+      parameters: {
+        person: { type: 'string', description: '这个日子属于谁，填昵称', required: true },
+        event_type: {
+          type: 'string',
+          description: 'birthday / payment_due / anniversary / festival / custom',
+          required: true,
+        },
+        occurs_on: { type: 'string', description: '日期 YYYY-MM-DD', required: true },
+        title: { type: 'string', description: '标题，不填就用默认（比如"生日"）' },
+      },
+      output: jsonOutput('创建结果'),
+      async execute(args) {
+        return await post('/api/assistant/actions', {
+          type: 'create_event',
+          person: args.person,
+          event_type: args.event_type,
+          occurs_on: args.occurs_on,
+          title: args.title,
+        })
+      },
+    }),
+  )
+
+  ctx.tools.register(
+    defineTool({
+      name: 'keeper_add_fact',
+      description:
+        '记一条关于某人的事实（喜好 / 忌讳 / 家庭 / 处境）。用户说了新情况时用。' +
+        '这条只会进"待确认"队列，用户点过才算进档案——所以可以直接记，' +
+        '但要如实告诉用户"先记下了，你去确认一下"。',
+      parameters: {
+        person: { type: 'string', description: '关于谁，填昵称', required: true },
+        content: { type: 'string', description: '事实本身，一句话，别加评论', required: true },
+        category: {
+          type: 'string',
+          description: 'preference（喜好）/ taboo（忌讳）/ structure（家庭结构）/ situation（处境）',
+        },
+      },
+      output: jsonOutput('记录结果'),
+      async execute(args) {
+        return await post('/api/assistant/actions', {
+          type: 'add_fact',
+          person: args.person,
+          content: args.content,
+          category: args.category,
         })
       },
     }),

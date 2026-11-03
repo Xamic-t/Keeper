@@ -168,3 +168,41 @@ async def test_ledger_requires_person_and_returns_totals(
     assert data["person_id"] == person_id
     assert data["total_out"] in {"300.00", "300.000"}
     assert data["recent"][0]["note"] == "助理读往来用例"
+
+
+async def test_person_detail_includes_upcoming_dates(
+    client: httpx.AsyncClient, assistant_as: Account
+) -> None:
+    """档案里要带"接下来的日子"。
+
+    没有它，模型回答"她生日是哪天"只能含糊说"没记着"——
+    而用户明明在系统里记过。2026-11-04 实测就踩到这一条。
+    """
+    from datetime import timedelta
+
+    from app.core.clock import local_today
+    from app.models.event import Event
+
+    person_id = await _person(assistant_as, "王姐")
+    today = local_today()
+    async with rls_session(assistant_as.id) as session:
+        session.add(
+            Event(
+                user_id=assistant_as.id,
+                person_id=person_id,
+                type="birthday",
+                title="王姐生日",
+                occurs_on=today + timedelta(days=5),
+            )
+        )
+        await session.commit()
+
+    response = await client.get(
+        f"/api/assistant/persons/{person_id}", headers={"X-Assistant-Token": TOKEN}
+    )
+
+    assert response.status_code == 200
+    dates = response.json()["data"]["dates"]
+    assert len(dates) == 1
+    assert dates[0]["type"] == "birthday"
+    assert dates[0]["in_days"] == 5

@@ -32,7 +32,7 @@ from app.models.log import ExtractionLog
 from app.models.person import Person
 from app.models.relationship import Relationship
 from app.models.user import User
-from app.services import storage
+from app.services import rag, storage
 from app.services.event import default_rrule
 from app.services.vision import vision
 
@@ -484,6 +484,25 @@ async def extract_from_raw_input(
             # 这个开关以前只存在库里没人读，勾了也没有任何效果 —— 等于对隐私撒谎。
             # 放在 commit 之后：先保证结果落库，再删原图，删失败也不影响数据。
             await _drop_image_if_disabled(session, raw_input, user_id)
+
+            # 把这次投喂的原文进检索索引：以后问"上次她说的预算是多少"要靠它。
+            # 失败不影响投喂结果（RAG 是增强，不是主流程）。
+            try:
+                await rag.index_source(
+                    session,
+                    user_id=user_id,
+                    source_type="raw_input",
+                    source_id=raw_input_id,
+                    content=raw_input.ocr_text or "",
+                    person_id=raw_input.person_id,
+                    scope="knowledge",
+                )
+            except Exception as exc:  # noqa: BLE001 - 索引失败不许拖垮投喂
+                logger.warning(
+                    "index raw_input failed raw_input_id=%s error=%s",
+                    raw_input_id,
+                    type(exc).__name__,
+                )
         except AppError as exc:
             await session.rollback()
             await _mark_failed(session, raw_input_id, user_id, exc.code.value, started)

@@ -1,35 +1,48 @@
 <script setup lang="ts">
 /**
- * 助理对话（2026-11-03）。
+ * 助理对话（2026-11-03 接回 Harness）。
  *
- * 为什么自己写而不嵌 Harness：用户明确要"一级菜单、不另开窗口、不用单独启动"。
- * 嵌 iframe 的代价是——要起 Node 侧车、要粘带 token 的地址、手机上根本进不去。
- * 详见 docs/32-助理整合计划.md 与 ARCHITECTURE 19.7.10。
+ * 形态没变：还是主界面第 3 个 tab、原生聊天窗口。变的是**谁来编排**——
+ * 文字消息走 `/api/conversation/turn/stream`，后端起 `dsh --profile headless`，
+ * 把它的 NDJSON 事件转成 SSE 推过来：
  *
- * 四条交互上的必须项：
- *  · 发送后立刻上气泡 + "正在想"，模型要几秒，不能让界面看起来卡死
- *  · 失败的消息留在原地并可重试——用户刚打的字不能丢
- *  · 助理执行过动作要显式说"已创建待办 · 查看"，否则用户不知道它干了什么
- *  · 附图要在本地说得清（预览 + 可撤），传上去之后走投喂流水线抽取
+ *    thinking    模型在想什么（一句摘要）
+ *    tool_call   调了哪个工具、参数是什么
+ *    tool_result 工具返回了什么（摘要）
+ *    final       最终回复
+ *
+ * 所以气泡下面能看到"它到底查了什么"，而不是只看到一句结论。
+ * 图片仍走原来的 multipart 接口（抽取链路没变）。
  */
 
 import { computed, nextTick, onMounted, ref } from 'vue'
 
-import { ApiError, api } from '@/api/client'
+import { ApiError, api, csrfToken } from '@/api/client'
 import type { AssistantAction, AssistantMessage, AssistantTurn } from '@/api/types'
 import PageHeader from '@/components/PageHeader.vue'
 import { describeAction, failureText } from '@/lib/assistantDisplay'
 
-/** 界面用的消息：比后端多一个本地状态（发送中/失败）与重试用的快照。 */
+interface Step {
+  tool: string
+  label: string
+  ok?: boolean
+  summary: string
+}
+
 interface Bubble {
   key: string
   role: 'user' | 'assistant'
   content: string
+  /** 原生路径（降级/历史）产生的动作结果 */
   actions: AssistantAction[]
+  /** Harness 路径产生的工具步骤 */
+  steps: Step[]
   status: 'ok' | 'sending' | 'failed'
+  streaming?: boolean
+  thinking?: string
+  notice?: string
   imageUrl?: string
   file?: File | null
-  /** 后端已落库的用户消息 id。失败重试时带回去，避免重复插一条同样的消息 */
   serverId?: number
 }
 
@@ -63,11 +76,16 @@ async function scrollToBottom() {
 }
 
 function toBubble(item: AssistantMessage): Bubble {
+  const rows = (item.actions ?? []) as (AssistantAction & Step)[]
   return {
     key: item.id ? `srv-${item.id}` : nextKey(),
     role: item.role,
     content: item.content,
-    actions: item.actions ?? [],
+    // 历史里两种形状混存：{type:'tool'} 是工具步骤，其余是原生动作
+    actions: rows.filter((row) => row.type !== 'tool') as AssistantAction[],
+    steps: rows
+      .filter((row) => row.type === 'tool')
+      .map((row) => ({ tool: row.tool, label: row.label, ok: row.ok, summary: row.summary })),
     status: 'ok',
   }
 }
@@ -102,32 +120,135 @@ function clearFile() {
   pendingFile.value = null
 }
 
+/** 图片走原来的 multipart 接口（抽取链路没变）。 */
+async function deliverWithImage(bubble: Bubble) {
+  const body = new FormData()
+  if (bubble.content) body.append('text', bubble.content)
+  if (bubble.file) body.append('image', bubble.file)
+
+  const turn = await api.post<AssistantTurn>('/conversation/messages', body)
+  bubble.status = 'ok'
+  bubble.serverId = turn.user_message_id ?? bubble.serverId
+  messages.value.push({
+    key: turn.assistant_message_id ? `srv-${turn.assistant_message_id}` : nextKey(),
+    role: 'assistant',
+    content: turn.reply,
+    actions: turn.actions ?? [],
+    steps: [],
+    status: 'ok',
+  })
+}
+
+/**
+ * 文字走 SSE。为什么不用 EventSource：它只能 GET，带不了 CSRF 头，也不能传 body。
+ * 所以用 fetch + ReadableStream 自己解 `data: {...}\n\n`。
+ */
+async function deliverStream(bubble: Bubble) {
+  const csrf = csrfToken()
+  const response = await fetch('/api/conversation/turn/stream', {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+    },
+    body: JSON.stringify({ text: bubble.content }),
+  })
+  if (!response.ok || !response.body) {
+    const payload = await response.json().catch(() => ({}))
+    throw new ApiError(
+      response.status,
+      payload?.error ?? { code: 'HTTP_ERROR', message: '助理这条没接上' },
+    )
+  }
+
+  const live: Bubble = {
+    key: nextKey(),
+    role: 'assistant',
+    content: '',
+    actions: [],
+    steps: [],
+    status: 'ok',
+    streaming: true,
+  }
+  messages.value.push(live)
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    const chunks = buffer.split('\n\n')
+    buffer = chunks.pop() ?? ''
+    for (const chunk of chunks) {
+      const line = chunk.trim()
+      if (!line.startsWith('data:')) continue
+      let event: Record<string, unknown>
+      try {
+        event = JSON.parse(line.slice(5).trim())
+      } catch {
+        continue
+      }
+
+      if (event.type === 'thinking') {
+        live.thinking = String(event.text ?? '')
+      } else if (event.type === 'tool_call') {
+        live.steps.push({
+          tool: String(event.tool ?? ''),
+          label: String(event.label ?? ''),
+          summary: '调用中…',
+        })
+        live.thinking = ''
+      } else if (event.type === 'tool_result') {
+        const pending = [...live.steps].reverse().find((step) => step.ok === undefined)
+        if (pending) {
+          pending.ok = Boolean(event.ok)
+          pending.summary = String(event.summary ?? '')
+        } else {
+          live.steps.push({
+            tool: String(event.tool ?? ''),
+            label: String(event.label ?? ''),
+            ok: Boolean(event.ok),
+            summary: String(event.summary ?? ''),
+          })
+        }
+      } else if (event.type === 'notice') {
+        live.notice = String(event.text ?? '')
+      } else if (event.type === 'final') {
+        live.content = String(event.text ?? '')
+        live.streaming = false
+        bubble.status = 'ok'
+      }
+    }
+    await scrollToBottom()
+  }
+
+  live.streaming = false
+  if (!live.content) {
+    live.content = '这次没拿到回复，点重试再问一次。'
+    live.status = 'failed'
+  }
+}
+
 /** 真正发请求。重试也走这里，所以参数是快照，不读输入框当前值。 */
 async function deliver(bubble: Bubble) {
   bubble.status = 'sending'
   sending.value = true
   await scrollToBottom()
 
-  const body = new FormData()
-  if (bubble.content) body.append('text', bubble.content)
-  if (bubble.file) body.append('image', bubble.file)
-  // 重试：上一次那句话已经落库了，让后端复用它，别再存一条
-  if (bubble.serverId) body.append('reuse_message_id', String(bubble.serverId))
-
   try {
-    const turn = await api.post<AssistantTurn>('/conversation/messages', body)
+    if (bubble.file) {
+      await deliverWithImage(bubble)
+    } else {
+      await deliverStream(bubble)
+    }
     bubble.status = 'ok'
-    bubble.serverId = turn.user_message_id ?? bubble.serverId
-    messages.value.push({
-      key: turn.assistant_message_id ? `srv-${turn.assistant_message_id}` : nextKey(),
-      role: 'assistant',
-      content: turn.reply,
-      actions: turn.actions ?? [],
-      status: 'ok',
-    })
   } catch (err) {
     bubble.status = 'failed'
-    // 后端把已落库的用户消息 id 放在 error.detail 里，重试时复用它
     if (err instanceof ApiError) {
       const persisted = err.detail?.user_message_id
       if (typeof persisted === 'number') bubble.serverId = persisted
@@ -138,6 +259,7 @@ async function deliver(bubble: Bubble) {
       role: 'assistant',
       content: `刚才没接上（${detail}）。点上面的「重试」我再答一次——你的话已经存下了，不会丢。`,
       actions: [],
+      steps: [],
       status: 'failed',
     })
   } finally {
@@ -154,11 +276,11 @@ async function send() {
     role: 'user',
     content: input.value.trim(),
     actions: [],
+    steps: [],
     status: 'sending',
     imageUrl: pendingPreview.value || undefined,
     file: pendingFile.value,
   }
-  // 预览地址所有权交给这条消息，别再 revoke
   pendingPreview.value = ''
   pendingFile.value = null
   input.value = ''
@@ -169,9 +291,11 @@ async function send() {
 
 async function retry(bubble: Bubble) {
   if (sending.value) return
-  // 去掉上一条"失败提示"，避免重试几次堆一串
   const last = messages.value[messages.value.length - 1]
   if (last?.status === 'failed' && last.role === 'assistant') messages.value.pop()
+  // 流式失败时可能残留一个空助手气泡，一并清掉，免得越重试越多
+  const tail = messages.value[messages.value.length - 1]
+  if (tail && tail.role === 'assistant' && !tail.content) messages.value.pop()
   await deliver(bubble)
 }
 
@@ -193,14 +317,12 @@ async function clearHistory() {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  // Enter 发送、Shift+Enter 换行（和微信/常见聊天一致）
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
     event.preventDefault()
     void send()
   }
 }
 
-/** 动作 → 图标/链接。纯逻辑放在 lib 里，Vitest 直接钉（见 assistantDisplay.test.ts）。 */
 const actionView = (action: AssistantAction) => describeAction(action)
 
 onMounted(loadHistory)
@@ -228,12 +350,10 @@ onMounted(loadHistory)
       {{ errorText }}
     </p>
 
-    <!-- 消息区 -->
     <div
       ref="listEl"
       class="flex-1 space-y-3 overflow-y-auto rounded-2xl border border-border bg-bg-alt/40 p-3 lg:p-5"
     >
-      <!-- 空状态：给三个能直接点的例子 -->
       <div v-if="!loading && !messages.length" class="flex h-full flex-col justify-center gap-3 px-2">
         <p class="text-sm text-ink-soft">你可以这么说：</p>
         <button
@@ -250,7 +370,6 @@ onMounted(loadHistory)
       </div>
 
       <template v-for="bubble in messages" :key="bubble.key">
-        <!-- 用户 -->
         <div v-if="bubble.role === 'user'" class="flex justify-end">
           <div class="max-w-[85%] space-y-1 lg:max-w-[70%]">
             <div class="rounded-2xl rounded-br-sm bg-accent px-3 py-2 text-sm text-white">
@@ -275,16 +394,38 @@ onMounted(loadHistory)
           </div>
         </div>
 
-        <!-- 助理 -->
         <div v-else class="flex justify-start">
           <div class="max-w-[88%] space-y-2 lg:max-w-[75%]">
-            <div
-              class="rounded-2xl rounded-bl-sm border border-border bg-surface px-3 py-2 text-sm"
-            >
-              <p class="whitespace-pre-wrap break-words">{{ bubble.content }}</p>
+            <p v-if="bubble.notice" class="text-xs text-ink-soft">{{ bubble.notice }}</p>
+
+            <div class="rounded-2xl rounded-bl-sm border border-border bg-surface px-3 py-2 text-sm">
+              <p v-if="bubble.content" class="whitespace-pre-wrap break-words">{{ bubble.content }}</p>
+              <p v-else-if="bubble.streaming" class="text-ink-soft">
+                {{ bubble.thinking || '正在想…' }}
+              </p>
             </div>
 
-            <!-- 已执行的动作：可点过去看 -->
+            <!-- Harness 的工具调用：它查了什么、拿到什么 -->
+            <details
+              v-if="bubble.steps.length"
+              class="rounded-xl border border-border bg-bg-alt/60 px-2.5 py-1.5 text-xs"
+              open
+            >
+              <summary class="cursor-pointer text-ink-soft">
+                执行过程 · {{ bubble.steps.length }} 步
+              </summary>
+              <ul class="mt-1.5 space-y-1">
+                <li v-for="(step, index) in bubble.steps" :key="index" class="flex gap-2">
+                  <span :class="step.ok === false ? 'text-accent' : 'text-ink-soft'">
+                    {{ step.ok === false ? '×' : step.ok ? '✓' : '·' }}
+                  </span>
+                  <span class="shrink-0">{{ step.label || step.tool }}</span>
+                  <span class="truncate text-ink-soft">{{ step.summary }}</span>
+                </li>
+              </ul>
+            </details>
+
+            <!-- 原生路径（降级/历史）的动作条 -->
             <div v-if="bubble.actions.length" class="space-y-1">
               <div
                 v-for="(action, index) in bubble.actions"
@@ -301,17 +442,14 @@ onMounted(loadHistory)
                 >
                   {{ actionView(action).link!.label }}
                 </RouterLink>
-                <span v-else-if="!action.ok" class="text-ink-soft">
-                  {{ failureText(action) }}
-                </span>
+                <span v-else-if="!action.ok" class="text-ink-soft">{{ failureText(action) }}</span>
               </div>
             </div>
           </div>
         </div>
       </template>
 
-      <!-- 打字中 -->
-      <div v-if="sending" class="flex justify-start">
+      <div v-if="sending && !messages[messages.length - 1]?.streaming" class="flex justify-start">
         <div
           class="rounded-2xl rounded-bl-sm border border-border bg-surface px-3 py-2 text-sm text-ink-soft"
         >
@@ -320,7 +458,6 @@ onMounted(loadHistory)
       </div>
     </div>
 
-    <!-- 输入区 -->
     <div class="mt-3 rounded-2xl border border-border bg-surface p-2">
       <div v-if="pendingPreview" class="mb-2 flex items-center gap-2 px-1">
         <img :src="pendingPreview" alt="待发图片" class="h-14 w-14 rounded-lg object-cover" />
@@ -349,9 +486,7 @@ onMounted(loadHistory)
           class="max-h-32 min-h-[2.5rem] flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-ink-soft"
           @keydown="onKeydown"
         />
-        <button class="btn btn-primary shrink-0" :disabled="!canSend" @click="send">
-          发送
-        </button>
+        <button class="btn btn-primary shrink-0" :disabled="!canSend" @click="send">发送</button>
       </div>
       <p class="hidden px-2 pt-1 text-[11px] text-ink-soft lg:block">
         Enter 发送 · Shift+Enter 换行 · 📎 发截图（会先识别内容，进确认队列）

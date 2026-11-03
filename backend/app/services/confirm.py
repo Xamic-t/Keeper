@@ -22,6 +22,7 @@ from app.models.fact import Fact, Tag
 from app.models.input import ChatSegment, RawInput
 from app.models.person import Person
 from app.services import ledger as ledger_service
+from app.services import rag
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +164,14 @@ async def confirm_fact(session: AsyncSession, fact_id: int, user_id: int) -> Con
         summary_stale = True
 
     await session.commit()
+
+    # 确认过的事实才进检索索引（待确认的是猜测，让它被检索到等于让模型编）。
+    # 索引失败不影响确认结果：RAG 是增强，不是主流程（§19.7.3 第三条）。
+    try:
+        await rag.index_fact(session, fact)
+    except Exception as exc:  # noqa: BLE001 - 索引失败不许拖垮确认
+        logger.warning("index fact failed fact_id=%s error=%s", fact_id, type(exc).__name__)
+
     return ConfirmResult(
         fact_id=fact_id,
         status="confirmed",

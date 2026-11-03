@@ -73,6 +73,22 @@ class Settings(BaseSettings):
     wecom_webhook: str | None = None
     pushplus_token: SecretStr | None = None
 
+    # ---- 助理编排（DeepSeek Harness 侧车，2026-11-03 回归）----
+    # 关闭后助理走原生对话（services/conversation.py），不依赖 Node
+    harness_enabled: bool = True
+    # harness 目录（里面有 node_modules/.bin/dsh 和 keeper-tools 插件）
+    harness_dir: str = str(Path(__file__).resolve().parents[2] / "harness")
+    # 一轮对话的整体超时：模型慢 + 工具多跳，给足 3 分钟
+    harness_timeout_s: float = 180.0
+    # 登录后是否顺手预热 Harness 进程（把 26 秒冷启动挪到用户点页面的时候）。
+    # 测试里必须关：每个用例都建号登录，预热会真的去起 dsh 子进程。
+    harness_prewarm: bool = True
+    # 向量模型（阿里百炼 text-embedding-v3，1024 维，对上 docs/06 的 vector(1024)）
+    embedding_model: str = "text-embedding-v3"
+    embedding_dim: int = 1024
+    # 向量通道的 key（没填就跳过向量、检索降级为关键词）
+    dashscope_api_key: SecretStr | None = None
+
     # ---- 助理（DeepSeek Harness 侧车）----
     # 侧车用这个 token 调只读接口，不传用户密码（ARCHITECTURE 19.7.4）。
     # 不配的话 /api/assistant/* 整组返回 503 —— 主流程一条都依赖它，所以不影响使用。

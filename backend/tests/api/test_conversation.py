@@ -573,3 +573,57 @@ async def test_snapshot_includes_confirmed_facts_and_tags(
     assert "苹果汁" in system, "已确认事实要进上下文"
     assert "preference:苹果汁" in system, "标签也要进"
     assert "还没确认的猜测" not in system, "待确认的事实不许进上下文，会污染回答"
+
+
+# ── SSE：Harness 编排（2026-11-03）──────────────────────────
+
+
+async def test_stream_endpoint_pipes_events(
+    client: httpx.AsyncClient, single_user: Account, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """SSE 端点要把服务层的事件原样吐出来（thinking/tool_call/final/done）。"""
+    from app.services import assistant_stream
+
+    async def fake_events(user_id: int, text: str):
+        yield {"type": "thinking", "text": "先查今天"}
+        yield {"type": "tool_call", "tool": "keeper_today", "label": "读今日待办", "args": {}}
+        yield {
+            "type": "tool_result",
+            "tool": "keeper_today",
+            "label": "读今日待办",
+            "ok": True,
+            "summary": "今天 2 件事",
+        }
+        yield {"type": "final", "text": "你有两件事要做。"}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(assistant_stream, "stream_events", fake_events)
+    csrf = await login(client, single_user)
+
+    response = await client.post(
+        "/api/conversation/turn/stream",
+        json={"text": "今天要做什么"},
+        headers=csrf_headers(csrf),
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    body = response.text
+    assert '"type": "tool_call"' in body
+    assert "读今日待办" in body
+    assert '"type": "final"' in body
+    assert body.strip().endswith('data: {"type": "done"}')
+
+
+async def test_stream_requires_csrf(client: httpx.AsyncClient, single_user: Account) -> None:
+    await login(client, single_user)
+    response = await client.post("/api/conversation/turn/stream", json={"text": "在吗"})
+    assert response.status_code == 403
+
+
+async def test_stream_rejects_empty_text(client: httpx.AsyncClient, single_user: Account) -> None:
+    csrf = await login(client, single_user)
+    response = await client.post(
+        "/api/conversation/turn/stream", json={"text": ""}, headers=csrf_headers(csrf)
+    )
+    assert response.status_code == 400

@@ -18,6 +18,7 @@ from app.core.security import create_session_token, generate_csrf_token
 from app.deps import CurrentUser, get_current_user, get_raw_session, get_session, require_csrf
 from app.models.user import User
 from app.services import auth as auth_service
+from app.services import harness
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -132,6 +133,9 @@ async def login(
     user_out = _user_out(user)
     csrf_token = generate_csrf_token()
     _set_auth_cookies(response, user_out.id, csrf_token)
+    # 顺手预热助理的 Harness 进程（26 秒冷启动挪到用户还在点页面的时候）。
+    # 后台跑，失败了只记日志：预热是优化，不是登录的前置条件。
+    harness.schedule_prewarm(user_out.id)
     return ok(LoginData(user=user_out, csrf_token=csrf_token))
 
 

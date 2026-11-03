@@ -7,16 +7,20 @@
   · `/api/conversation` —— 助理，多轮模型对话，能执行动作
 """
 
+import json
+from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.response import DataResponse, ok
 from app.deps import CurrentUser, get_current_user, get_session, require_csrf
+from app.services import assistant_stream, harness
 from app.services import conversation as conversation_service
 from app.services import ingest as ingest_service
 
@@ -66,10 +70,13 @@ class ClearOut(BaseModel):
     summary="对话历史（最近 N 条，正序）",
 )
 async def list_messages(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_session)],
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
     """刷新页面/换设备后接着聊。RLS 保证只拿到自己的。"""
+    # 打开助理页就等于马上要说话：顺手预热 Harness 进程（26 秒冷启动挪到这里）
+    harness.schedule_prewarm(user.id)
     rows = await conversation_service.load_history(session, limit=limit)
     return ok([MessageOut(**item) for item in rows])
 
@@ -120,3 +127,44 @@ async def clear_messages(
     """只删自己的（RLS 保证）。不删已建出来的待办/事件。"""
     deleted = await conversation_service.clear_history(session)
     return ok(ClearOut(deleted=deleted))
+
+
+# ── SSE：Harness 编排（2026-11-03 回归）────────────────────
+#
+# 编排在 services/assistant_stream.py；这里只做三件事：
+# 校验入参、把 dict 事件变成 SSE 文本、声明响应头。
+
+
+class TurnIn(BaseModel):
+    """一轮对话的入参。图片仍走上面的 `/messages`（multipart），这里只管文字。"""
+
+    text: str = Field(min_length=1, max_length=4000)
+
+
+def _sse(payload: dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _to_sse(user_id: int, text: str) -> AsyncIterator[str]:
+    async for event in assistant_stream.stream_events(user_id, text):
+        yield _sse(event)
+
+
+@router.post(
+    "/turn/stream",
+    summary="发一条给助理（SSE 流式，Harness 编排；不可用时自动降级）",
+    dependencies=[Depends(require_csrf)],
+)
+async def stream_turn(
+    payload: TurnIn,
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> StreamingResponse:
+    """事件类型：thinking / tool_call / tool_result / final / notice / done。
+
+    前端用 fetch + ReadableStream 读，不用 EventSource（那个只能 GET、带不了 CSRF 头）。
+    """
+    return StreamingResponse(
+        _to_sse(user.id, payload.text.strip()),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

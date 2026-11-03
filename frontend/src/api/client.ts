@@ -57,6 +57,11 @@ function onLoginPage(): boolean {
   return window.location.pathname.startsWith('/login')
 }
 
+/** 读 CSRF cookie。流式请求要自己拼 header，所以把这个暴露出来。 */
+export function csrfToken(): string | null {
+  return readCookie('csrf')
+}
+
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp(`(^|;\\s*)${name}=([^;]*)`))
   return match ? decodeURIComponent(match[2]) : null

@@ -1,14 +1,35 @@
-# Keeper 的 Harness 覆盖层：把只读工具插件挂进 web profile。
+# Keeper 的 Harness 覆盖层。
 #
-# 用法（不装任何东西，随时可拆）：
-#   ./run.sh                       # 内部就是 npx dsh web --patch ./cordis.patch.yml
+# 两件事：
+#   ① 挂上 keeper-tools（只读查询 + 三类写操作，全走主服务 API）
+#   ② **关掉所有本机工具**——助理是"记事簿的嘴"，不是"电脑的手"
 #
-# 格式依据 `~/.dsh/profiles/web/cordis.patch.yml` 的原话：
-#   "a top-level YAML array of loader patch entries
-#    (id-targeted config overrides, disables, and insert lists)"
-# 所以「新增一个插件」走 insert 列表；只有改已有条目才需要顶层 id。
+# 为什么必须关掉（2026-11-04 实测）：不关的话模型遇到"今天几号"会去调 `bash date`，
+# 而沙箱后端没装，于是先吃一个报错、再绕一步才回到 keeper_* 工具。
+# 既慢又吓人——聊天里会冒一条"bash 失败"。`DSH_DISABLE_TOOLS` 环境变量不生效，
+# 只能在这里按插件 id 逐个 disable。
 #
-# 自查：npx dsh --profile web --patch ./cordis.patch.yml --dump-config | grep keeper
+# 格式依据 `~/.dsh/profiles/*/cordis.yml`：顶层是 patch 数组，`disable` 列 id，`insert` 加插件。
+#
+# 自查：dsh --profile sdk --patch ./cordis.patch.yml --dump-config | grep keeper
+- disable:
+    - tool-bash
+    - tool-pwsh
+    - tool-terminal
+    - tool-fs
+    - tool-fs-search
+    - tool-str-replace-editor
+    - tool-web
+    - tool-subagent
+    - tool-subagent-control
+    - tool-subagent-list-agents
+    - tool-subagent-fork
+    - tool-workflow
+    - tool-working-directory
+    - tool-jobs
+    - tool-todo
+    - tool-goal
+    - tool-skill
 - insert:
     - id: keeper-tools
       name: ./keeper-tools/index.js

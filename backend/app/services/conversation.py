@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.clock import local_today
 from app.core.errors import AppError, ErrorCode
+from app.db import SessionLocal
 from app.models.chat import ChatMessage
 from app.models.event import Event
 from app.models.fact import Fact, Tag
@@ -309,6 +310,16 @@ async def _create_todo(
         return ActionResult("create_todo", False, "建待办失败", reason="没给标题")
 
     person = await _resolve_person(session, payload.get("person"))
+    wanted = str(payload.get("person") or "").strip()
+    if wanted and person is None:
+        # 说了是谁但认不出来：**不要静默建一条不带人的待办**。
+        # 那样用户会以为"记到王姐头上了"，实际是一条孤儿待办——比失败更糟。
+        return ActionResult(
+            "create_todo",
+            False,
+            "建待办失败",
+            reason=f"没认出「{wanted}」，先确认是哪个人",
+        )
     due_on = _parse_date(payload.get("due_on"))
     todo = await todo_service.create_todo(
         session,
@@ -436,6 +447,26 @@ async def execute_actions(
             rejected.append(raw)
 
     return results, rejected
+
+
+async def run_single_action(
+    session: AsyncSession, user_id: int, payload: dict[str, Any]
+) -> ActionResult:
+    """执行**一条**动作并提交。给 Harness 的写工具用。
+
+    为什么不直接让 API 调 `execute_actions`：架构规定 api 层不许碰事务
+    （`tests/test_architecture.py::test_api_does_not_access_database`）。
+    这里既执行又提交，API 只负责把结果转成响应。
+    """
+    results, _rejected = await execute_actions(session, user_id, [payload])
+    if not results:
+        raise AppError(
+            ErrorCode.INVALID_STATE,
+            "这个动作不在允许范围内",
+            status_code=400,
+        )
+    await session.commit()
+    return results[0]
 
 
 # ── 一轮对话 ──────────────────────────────────────────────
@@ -679,3 +710,68 @@ async def clear_history(session: AsyncSession) -> int:
     result = await session.execute(delete(ChatMessage))
     await session.commit()
     return int(result.rowcount or 0)
+
+
+# ── 给 Harness 用的：历史拼装 + 落库 ─────────────────────
+
+
+async def recent_dialogue(user_id: int, turns: int = 4) -> str:
+    """把最近几轮对话拼成一段文本，塞进给侧车的任务里。
+
+    为什么不给侧车用"会话 id 续聊"：那样 dsh 自己存一份历史、我们 chat_messages 存一份，
+    两份会漂移（用户清空了对话，侧车还记得）。每轮把最近几轮带上，只有一份真相。
+    """
+    async with SessionLocal() as session:
+        session.info["rls_user_id"] = user_id
+        rows = list(
+            (
+                await session.execute(
+                    select(ChatMessage).order_by(ChatMessage.id.desc()).limit(turns * 2)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    if not rows:
+        return ""
+    lines = []
+    for item in reversed(rows):
+        who = "用户" if item.role == "user" else "助理"
+        lines.append(f"{who}：{(item.content or '').strip()[:200]}")
+    return "\n".join(lines)
+
+
+async def record_exchange(
+    user_id: int,
+    *,
+    user_text: str,
+    assistant_text: str,
+    steps: list[dict[str, Any]] | None = None,
+) -> tuple[int | None, int | None]:
+    """把一轮（用户 + 助手）落库，返回两条消息 id。
+
+    助手消息的 `actions` 里存的是**工具步骤**（Harness 那条路径），
+    和原生路径的"动作结果"共用同一个 JSONB 字段：前端按 type 区分渲染。
+    """
+    async with SessionLocal() as session:
+        session.info["rls_user_id"] = user_id
+        user_message = ChatMessage(user_id=user_id, role="user", content=user_text)
+        session.add(user_message)
+        await session.commit()
+
+        assistant_message = ChatMessage(
+            user_id=user_id,
+            role="assistant",
+            content=assistant_text,
+            actions=steps or [],
+        )
+        session.add(assistant_message)
+        await session.commit()
+        return user_message.id, assistant_message.id
+
+
+async def run_turn_scoped(user_id: int, *, text: str) -> TurnResult:
+    """给 SSE 降级路径用：自己开一个带 RLS 变量的 session 跑一轮原生对话。"""
+    async with SessionLocal() as session:
+        session.info["rls_user_id"] = user_id
+        return await run_turn(session, user_id, text=text)
