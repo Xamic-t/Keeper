@@ -1,4 +1,7 @@
-"""管理接口：账号列表 / 建号 / 禁用或重置密码（仅 owner）。
+"""管理接口：账号列表 / 建号 / 禁用或重置密码 / 后台概览（仅 owner）。
+
+2026-11-03：管理后台从"藏在设置里的账号列表"改成独立页面（`/admin`），
+所以这里多了一个 `/api/admin/overview`——给后台首页提供"每个账号的行为量"。
 
 对应文档：docs/07-后端设计.md 5.1（管理）
 
@@ -118,3 +121,65 @@ async def update_user(
         password=payload.password,
     )
     return ok(_user_out(user))
+
+
+# ── 后台概览 ─────────────────────────────────────────────
+# 单独一个 router（前缀 /admin，而不是 /admin/users）：概览不是"用户资源"的一部分。
+overview_router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+class AccountStatsOut(BaseModel):
+    total: int
+    owners: int
+    active: int
+    disabled: int
+
+
+class TotalsOut(BaseModel):
+    persons: int
+    facts: int
+    pending_confirmations: int
+    todos_open: int
+    ledger: int
+    reminders_sent: int
+    raw_inputs: int
+    chat_messages: int
+
+
+class UserStatsOut(TotalsOut):
+    id: int | None
+    username: str
+    display_name: str | None = None
+    role: str
+    is_active: bool
+    created_at: datetime
+    last_login_at: datetime | None = None
+    last_active_at: datetime | None = None
+
+
+class SystemOut(BaseModel):
+    app_env: str
+    app_version: str
+    migration: str | None = None
+    today: str
+
+
+class OverviewOut(BaseModel):
+    accounts: AccountStatsOut
+    totals: TotalsOut
+    users: list[UserStatsOut]
+    system: SystemOut
+
+
+@overview_router.get(
+    "/overview",
+    response_model=DataResponse[OverviewOut],
+    summary="后台概览（账号状态 + 每个账号的行为量）",
+)
+async def get_overview(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _: Annotated[CurrentUser, Depends(require_owner)] = None,
+) -> dict[str, Any]:
+    """只有 owner 能看。返回的是**数量**，不返回任何人的内容。"""
+    data = await admin_service.overview(session)
+    return ok(OverviewOut(**data))

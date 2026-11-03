@@ -19,9 +19,9 @@ const navItems = [
   { name: 'calendar', label: '日历', icon: '▦' },
   { name: 'todos', label: '待办', icon: '☑' },
 ]
-const adminItems = computed(() =>
-  auth.user?.role === 'owner' ? [{ name: 'admin', label: '账号', icon: '⚙' }] : [],
-)
+// 管理后台**不混在业务菜单里**（2026-11-03 用户明确要求）：它是独立界面，
+// 入口放在左下角账号区，和「设置」并列但单独一行、带分隔线。
+const isOwner = computed(() => auth.user?.role === 'owner')
 
 const active = computed(() => String(route.name ?? 'today'))
 
@@ -52,24 +52,24 @@ async function signOut() {
           <span>{{ item.label }}</span>
         </RouterLink>
 
-        <RouterLink
-          v-for="item in adminItems"
-          :key="item.name"
-          :to="{ name: item.name }"
-          class="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-ink-soft transition hover:bg-surface"
-          :class="active === item.name ? 'bg-surface font-medium text-ink shadow-sm' : ''"
-        >
-          <span class="w-4 text-center">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-        </RouterLink>
       </nav>
 
-      <div class="mt-auto space-y-2 px-2 text-sm">
-        <div class="text-ink-soft">{{ auth.user?.display_name || auth.user?.username }}</div>
-        <RouterLink :to="{ name: 'settings' }" class="block text-ink-soft hover:text-ink">
+      <div class="mt-auto px-2 text-sm">
+        <div class="mb-2 text-ink-soft">{{ auth.user?.display_name || auth.user?.username }}</div>
+        <RouterLink :to="{ name: 'settings' }" class="block py-1 text-ink-soft hover:text-ink">
           设置
         </RouterLink>
-        <button class="text-ink-soft hover:text-ink" @click="signOut">退出</button>
+        <button class="block py-1 text-ink-soft hover:text-ink" @click="signOut">退出</button>
+
+        <!-- 管理员才有：单独一条，靠分隔线隔开，不和业务菜单混排 -->
+        <RouterLink
+          v-if="isOwner"
+          :to="{ name: 'admin' }"
+          class="mt-3 flex items-center gap-2 border-t border-border pt-3 text-ink-soft hover:text-ink"
+        >
+          <span class="w-4 text-center">⚙</span>
+          <span>管理后台</span>
+        </RouterLink>
       </div>
     </aside>
 

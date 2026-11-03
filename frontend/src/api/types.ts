@@ -152,6 +152,40 @@ export interface ConfirmationGroup {
   items: ConfirmationItem[]
 }
 
+/**
+ * 管理后台概览（2026-11-03 新增）。
+ *
+ * 只含**数量**，不含任何用户内容——后台看的是"用得多不多"，不是"记了什么"。
+ */
+export interface AdminTotals {
+  persons: number
+  facts: number
+  pending_confirmations: number
+  todos_open: number
+  ledger: number
+  reminders_sent: number
+  raw_inputs: number
+  chat_messages: number
+}
+
+export interface AdminUserStats extends AdminTotals {
+  id: number | null
+  username: string
+  display_name: string | null
+  role: string
+  is_active: boolean
+  created_at: string
+  last_login_at: string | null
+  last_active_at: string | null
+}
+
+export interface AdminOverview {
+  accounts: { total: number; owners: number; active: number; disabled: number }
+  totals: AdminTotals
+  users: AdminUserStats[]
+  system: { app_env: string; app_version: string; migration: string | null; today: string }
+}
+
 export interface AdminUserOut {
   id: number
   username: string

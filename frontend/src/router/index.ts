@@ -19,7 +19,13 @@ const router = createRouter({
     { path: '/calendar', name: 'calendar', component: () => import('@/views/CalendarView.vue') },
     { path: '/todos', name: 'todos', component: () => import('@/views/TodosView.vue') },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue') },
-    { path: '/admin', name: 'admin', component: () => import('@/views/AdminView.vue') },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: () => import('@/views/AdminConsoleView.vue'),
+      // 独立后台：不套业务外壳（见 App.vue），只有 owner 能进
+      meta: { layout: 'admin', ownerOnly: true },
+    },
     { path: '/assistant', name: 'assistant', component: () => import('@/views/AssistantChatView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
@@ -31,6 +37,9 @@ router.beforeEach(async (to) => {
   const auth = useAuthStore()
   const user = await auth.ensureSession()
   if (!user) return { name: 'login', query: { redirect: to.fullPath } }
+
+  // 管理后台只给 owner：非 owner 直接回业务首页，别留一个 403 白页
+  if (to.meta.ownerOnly && user.role !== 'owner') return { name: 'today' }
   return true
 })
 
